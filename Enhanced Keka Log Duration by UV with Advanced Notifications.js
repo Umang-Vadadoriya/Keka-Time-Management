@@ -1,12 +1,26 @@
 // ==UserScript==
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
+// @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
 // @version      6.1
 // @description  Calculate log durations with improved UI and smart notifications
-// @match        https://ezeetechnosys.keka.com/
+// @description:en Calculate log durations with improved UI and smart notifications (English)
+// @author       Umang Vadadoriya
+// @match        https://ezeetechnosys.keka.com/*
+// @include      https://ezeetechnosys.keka.com/*
+// @exclude      https://ezeetechnosys.keka.com/login*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=keka.com
-// @grant        none
-// @license MIT
+// @grant        GM_notification
+// @require      https://code.jquery.com/jquery-3.6.0.min.js
+// @run-at       document-end
+// @updateURL    https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV%20with%20Advanced%20Notifications.js
+// @downloadURL  https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV%20with%20Advanced%20Notifications.js
+// @supportURL   https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management/issues
+// @homepage     https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
+// @compatible   firefox
+// @compatible   chrome
+// @license      MIT
+// @noframes
 // ==/UserScript==
 
 (function () {
