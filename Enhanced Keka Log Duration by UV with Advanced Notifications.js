@@ -21,6 +21,8 @@
 // @compatible   chrome
 // @license      MIT
 // @noframes
+// @contributionURL https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
+// @copyright    2024, Umang Vadadoriya (https://github.com/Umang-Vadadoriya-YCS)
 // ==/UserScript==
 
 (function () {
