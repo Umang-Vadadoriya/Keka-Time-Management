@@ -44,7 +44,7 @@
 
     // Notification messages array
     const NOTIFICATION_MESSAGES = [
-        "Time check! {remaining} left in your workday. Keep going! 💪",
+        "Time check! {remaining} left in your workday. Keep going! 💠",
         "Quick update: {remaining} until you hit your 8-hour mark! 🎯",
         "Checking in - {remaining} to go. You've got this! 🌟",
         "Time flies! {remaining} remaining in your workday. Stay focused! 🚀",
