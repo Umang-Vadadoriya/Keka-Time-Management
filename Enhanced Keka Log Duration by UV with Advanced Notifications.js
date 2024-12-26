@@ -339,7 +339,6 @@
         if (modalDialog) {
             modalDialog.style.width = '500px';
         }
-        console.log(`Updating UI at ${new Date()}...`, container);
 
         const results = processTimeEntries(container);
         if (!results) return;
