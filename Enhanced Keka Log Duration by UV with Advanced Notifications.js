@@ -28,6 +28,12 @@
 // @copyright    2024, Umang Vadadoriya (https://github.com/Umang-Vadadoriya-YCS)
 // ==/UserScript==
 
+// #TODO - Add a feature to Copy the Total Duration to Clipboard
+// #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard
+// #TODO - Add a feature to Copy the Overtime to Clipboard
+// #TODO - Add a feature to Copy the Remaining Time to Clipboard
+// #TODO - Add a feature to Show Total Break Duration in UI
+
 (function () {
     'use strict';
 
