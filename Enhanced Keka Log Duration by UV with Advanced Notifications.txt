@@ -28,9 +28,6 @@
 // @copyright    2024, Umang Vadadoriya (https://github.com/Umang-Vadadoriya-YCS)
 // ==/UserScript==
 
-
-// #TODO - On Click of notification it should take us to the Website
-// #TODO - Show Total Break Time
 // #TODO - Add a feature to Copy the Total Duration to Clipboard
 // #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard
 // #TODO - Add a feature to Copy the Overtime to Clipboard
