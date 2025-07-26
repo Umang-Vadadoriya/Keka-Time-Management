@@ -28,9 +28,6 @@
 // @copyright    2024, Umang Vadadoriya (https://github.com/Umang-Vadadoriya-YCS)
 // ==/UserScript==
 
-
-// #TODO - On Click of notification it should take us to the Website
-// #TODO - Show Total Break Time
 // #TODO - Add a feature to Copy the Total Duration to Clipboard
 // #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard
 // #TODO - Add a feature to Copy the Overtime to Clipboard
@@ -342,16 +339,6 @@
         totalBreakTimeMinutes = 0;
     }
 
-    function copyToClipboard(text) {
-        navigator.clipboard.writeText(text).catch(err => {
-            console.error('Failed to copy:', err);
-        });
-    }
-
-    function formatCopyText(emoji, label, value) {
-        return `${emoji}\n${label}:\n${value}`;
-    }
-
     const updateUI = debounce((container) => {
         if (!container) return;
         const modalDialog = document.querySelector('.modal-dialog.right-modal.right-modal-450');
@@ -407,7 +394,6 @@
                     transition: transform 0.2s ease-in-out;
                     position: relative;
                     overflow: hidden;
-                    cursor: pointer;
                 }
                 .metric-card:hover {
                     transform: translateY(-2px);
@@ -446,41 +432,28 @@
                 }
             </style>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-                <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
+                <div class="metric-card" style="background: ${gradients.purple}">
                     <div class="spark-icon">⏱️</div>
                     <div class="metric-label">Total Duration</div>
                     <div class="metric-value">${results.totalDuration}</div>
                 </div>
-                <div class="metric-card" style="background: ${gradients.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
+                <div class="metric-card" style="background: ${gradients.blue}">
                     <div class="spark-icon">🎯</div>
                     <div class="metric-label">8hr Completion</div>
                     <div class="metric-value">${completionTime}</div>
                 </div>
-                <div class="metric-card" style="background: ${gradients.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
+                <div class="metric-card" style="background: ${gradients.orange}">
                     <div class="spark-icon">⭐</div>
                     <div class="metric-label">Overtime</div>
                     <div class="metric-value">${overtime}</div>
                 </div>
-                <div class="metric-card" style="background: ${isCompleted ? gradients.completed : gradients.green}" onclick="this.dispatchEvent(new CustomEvent('copyRemaining', {bubbles: true}))">
+                <div class="metric-card" style="background: ${isCompleted ? gradients.completed : gradients.green}">
                     <div class="spark-icon">${isCompleted ? '🎉' : '⌛'}</div>
                     <div class="metric-label">Remaining Time</div>
                     <div class="metric-value">${remainingTimeStr}</div>
                 </div>
             </div>
         `;
-
-        // Add event listeners for copying
-        totalDisplay.addEventListener('copyDuration', () => 
-            copyToClipboard(formatCopyText('⏱️', 'Total Duration', results.totalDuration)));
-        
-        totalDisplay.addEventListener('copyCompletion', () => 
-            copyToClipboard(formatCopyText('🎯', '8hr Completion', completionTime)));
-        
-        totalDisplay.addEventListener('copyOvertime', () => 
-            copyToClipboard(formatCopyText('⭐', 'Overtime', overtime)));
-        
-        totalDisplay.addEventListener('copyRemaining', () => 
-            copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeStr)));
 
         // Add colorful styling to break duration badges
         const breakInfoElements = container.querySelectorAll('.break-info');
