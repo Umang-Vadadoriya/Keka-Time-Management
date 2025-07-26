@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Enhanced Keka Log Duration by UV with Advanced Notifications
+// @name         Enhanced Keka Log Duration by UV
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
 // @version      6.2
-// @description  Calculate log durations with improved UI and smart notifications
-// @description:en Calculate log durations with improved UI and smart notifications (English)
+// @description  Calculate log durations with improved UI
+// @description:en Calculate log durations with improved UI (English)
 // @author       Umang Vadadoriya
 // @tag          utility
 // @tag          automation
@@ -12,12 +12,11 @@
 // @include      https://ezeetechnosys.keka.com/*
 // @exclude      https://ezeetechnosys.keka.com/login*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=keka.com
-// @grant        GM_notification
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @run-at       document-end
 // @source       https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
-// @updateURL    https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV%20with%20Advanced%20Notifications.js
-// @downloadURL  https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV%20with%20Advanced%20Notifications.js
+// @updateURL    https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV.js
+// @downloadURL  https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV.js
 // @supportURL   https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management/issues
 // @homepage     https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
 // @compatible   firefox
@@ -28,9 +27,6 @@
 // @copyright    2024, Umang Vadadoriya (https://github.com/Umang-Vadadoriya-YCS)
 // ==/UserScript==
 
-
-// #TODO - On Click of notification it should take us to the Website
-// #TODO - Show Total Break Time
 // #TODO - Add a feature to Copy the Total Duration to Clipboard
 // #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard
 // #TODO - Add a feature to Copy the Overtime to Clipboard
@@ -42,31 +38,10 @@
 
     // Global state variables
     let modalOpen = false;
-    let lastStartTime = null;
-    let notificationInterval = null;
     let totalBreakTimeMinutes = 0;
-    let notificationCounter = 0;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
-    const NOTIFICATION_INTERVAL = 1; // minutes
-
-    // Notification messages array
-    const NOTIFICATION_MESSAGES = [
-        "Time check! {remaining} left in your workday. Keep going! 💠",
-        "Quick update: {remaining} until you hit your 8-hour mark! 🎯",
-        "Checking in - {remaining} to go. You've got this! 🌟",
-        "Time flies! {remaining} remaining in your workday. Stay focused! 🚀",
-        "Progress check: {remaining} left. Take a stretch if needed! 🧘‍♂️",
-        "Head's up! {remaining} to complete your day. Keep up the great work! 👍",
-        "Time update: {remaining} remaining. Remember to stay hydrated! 💧",
-        "Almost there! {remaining} left in your workday. You're doing great! ⭐"
-    ];
-
-    // Request notification permission on script load
-    if (Notification.permission === 'default') {
-        Notification.requestPermission();
-    }
 
     // Utility functions
     function debounce(func, wait) {
@@ -79,21 +54,6 @@
             clearTimeout(timeout);
             timeout = setTimeout(later, wait);
         };
-    }
-
-    function showNotification(message) {
-        if (Notification.permission === 'granted') {
-            new Notification('Keka Time Alert', {
-                body: message,
-                icon: 'https://www.google.com/s2/favicons?sz=64&domain=keka.com'
-            });
-        }
-    }
-
-    function getRandomNotificationMessage(remaining) {
-        const messageIndex = notificationCounter % NOTIFICATION_MESSAGES.length;
-        notificationCounter++;
-        return NOTIFICATION_MESSAGES[messageIndex].replace('{remaining}', remaining);
     }
 
     function parseTime(timeStr) {
@@ -235,7 +195,6 @@
     }
 
     function calculateRemainingTime(startTimeStr, breakTimeMinutes) {
-        // TODO - Handle Calculation Based On Last Start Time
         const start = parseTime(startTimeStr);
         if (!start) return null;
 
@@ -254,102 +213,6 @@
             completed: effectiveWorkMinutes >= EIGHT_HOURS_IN_MINUTES,
             overtime: Math.min(0, remainingMinutes)
         };
-    }
-
-    function shouldNotify(remaining) {
-        // For regular workday remaining time
-        const hourNotifications = [8, 7, 6, 5, 4, 3, 2];
-        const minuteNotifications = [60, 50, 40, 30, 20, 15, 10, 5, 0];
-
-        // Convert remaining minutes to hours and minutes
-        const hours = Math.floor(remaining / 60);
-        const minutes = remaining % 60;
-
-        // Check if current time matches any notification point
-        return hourNotifications.includes(hours) && minutes === 0 ||
-               hours === 0 && minuteNotifications.includes(minutes);
-    }
-
-    function shouldNotifyOvertime(overtimeMinutes) {
-        // For overtime notifications
-        const overtimeHourNotifications = [1, 2, 3, 4, 5];
-        const overtimeMinuteNotifications = [5, 10, 15, 20, 25, 30];
-
-        const hours = Math.floor(overtimeMinutes / 60);
-        const minutes = overtimeMinutes % 60;
-
-        return overtimeHourNotifications.includes(hours) && minutes === 0 ||
-               hours === 0 && overtimeMinuteNotifications.includes(minutes);
-    }
-
-    function startBackgroundNotifications() {
-        if (notificationInterval) {
-            clearInterval(notificationInterval);
-        }
-
-        const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
-        if (!container) return;
-
-        const firstStartElement = container.querySelector('.d-flex.align-items-center .w-120.mr-20 .text-small');
-        if (!firstStartElement) return;
-
-        lastStartTime = firstStartElement.textContent.trim();
-
-
-        // Calculate initial break time
-        const results = processTimeEntries(container, false);
-        totalBreakTimeMinutes = results ? results.breakTime : 0;
-
-        notificationInterval = setInterval(() => {
-            const remainingTime = calculateRemainingTime(lastStartTime, totalBreakTimeMinutes);
-
-            if (remainingTime) {
-                if (remainingTime.overtime < 0) {
-                    // Handle overtime notifications
-                    const overtimeMinutes = Math.abs(remainingTime.overtime);
-                    if (shouldNotifyOvertime(overtimeMinutes)) {
-                        const hours = Math.floor(overtimeMinutes / 60);
-                        const minutes = overtimeMinutes % 60;
-                        let message = "You're working overtime! ";
-                        if (hours > 0) {
-                            message += `${hours} hour${hours > 1 ? 's' : ''} `;
-                        }
-                        if (minutes > 0) {
-                            message += `${minutes} minute${minutes > 1 ? 's' : ''} `;
-                        }
-                        message += "extra! 🚀";
-                        showNotification(message);
-                    }
-                } else if (!remainingTime.completed && shouldNotify(remainingTime.remaining)) {
-                    // Handle regular workday notifications
-                    const timeStr = formatSimpleRemainingTime(remainingTime.remaining);
-                    showNotification(getRandomNotificationMessage(timeStr));
-                } else if (remainingTime.completed && remainingTime.remaining === 0) {
-                    // Notify when exactly 8 hours are completed
-                    showNotification("Congratulations! You've completed your 8-hour workday! 🎉");
-                }
-            }
-            updateUI(container);
-        }, NOTIFICATION_INTERVAL * 60 * 1000);
-    }
-
-    function stopBackgroundNotifications() {
-        if (notificationInterval) {
-            clearInterval(notificationInterval);
-            notificationInterval = null;
-        }
-        lastStartTime = null;
-        totalBreakTimeMinutes = 0;
-    }
-
-    function copyToClipboard(text) {
-        navigator.clipboard.writeText(text).catch(err => {
-            console.error('Failed to copy:', err);
-        });
-    }
-
-    function formatCopyText(emoji, label, value) {
-        return `${emoji}\n${label}:\n${value}`;
     }
 
     const updateUI = debounce((container) => {
@@ -407,7 +270,6 @@
                     transition: transform 0.2s ease-in-out;
                     position: relative;
                     overflow: hidden;
-                    cursor: pointer;
                 }
                 .metric-card:hover {
                     transform: translateY(-2px);
@@ -446,41 +308,28 @@
                 }
             </style>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-                <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
+                <div class="metric-card" style="background: ${gradients.purple}">
                     <div class="spark-icon">⏱️</div>
                     <div class="metric-label">Total Duration</div>
                     <div class="metric-value">${results.totalDuration}</div>
                 </div>
-                <div class="metric-card" style="background: ${gradients.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
+                <div class="metric-card" style="background: ${gradients.blue}">
                     <div class="spark-icon">🎯</div>
                     <div class="metric-label">8hr Completion</div>
                     <div class="metric-value">${completionTime}</div>
                 </div>
-                <div class="metric-card" style="background: ${gradients.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
+                <div class="metric-card" style="background: ${gradients.orange}">
                     <div class="spark-icon">⭐</div>
                     <div class="metric-label">Overtime</div>
                     <div class="metric-value">${overtime}</div>
                 </div>
-                <div class="metric-card" style="background: ${isCompleted ? gradients.completed : gradients.green}" onclick="this.dispatchEvent(new CustomEvent('copyRemaining', {bubbles: true}))">
+                <div class="metric-card" style="background: ${isCompleted ? gradients.completed : gradients.green}">
                     <div class="spark-icon">${isCompleted ? '🎉' : '⌛'}</div>
                     <div class="metric-label">Remaining Time</div>
                     <div class="metric-value">${remainingTimeStr}</div>
                 </div>
             </div>
         `;
-
-        // Add event listeners for copying
-        totalDisplay.addEventListener('copyDuration', () => 
-            copyToClipboard(formatCopyText('⏱️', 'Total Duration', results.totalDuration)));
-        
-        totalDisplay.addEventListener('copyCompletion', () => 
-            copyToClipboard(formatCopyText('🎯', '8hr Completion', completionTime)));
-        
-        totalDisplay.addEventListener('copyOvertime', () => 
-            copyToClipboard(formatCopyText('⭐', 'Overtime', overtime)));
-        
-        totalDisplay.addEventListener('copyRemaining', () => 
-            copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeStr)));
 
         // Add colorful styling to break duration badges
         const breakInfoElements = container.querySelectorAll('.break-info');
@@ -521,10 +370,8 @@
         if (container && !modalOpen) {
             modalOpen = true;
             updateUI(container);
-            startBackgroundNotifications();
         } else if (!container && modalOpen) {
             modalOpen = false;
-            stopBackgroundNotifications();
         }
     });
 
