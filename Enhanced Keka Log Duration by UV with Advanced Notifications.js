@@ -8,9 +8,9 @@
 // @author       Umang Vadadoriya
 // @tag          utility
 // @tag          automation
-// @match        https://ezeetechnosys.keka.com/*
-// @include      https://ezeetechnosys.keka.com/*
-// @exclude      https://ezeetechnosys.keka.com/login*
+// @match        https://your-tenant.keka.com/*
+// @include      https://your-tenant.keka.com/*
+// @exclude      https://your-tenant.keka.com/login*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=keka.com
 // @grant        GM_notification
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
@@ -29,13 +29,13 @@
 // ==/UserScript==
 
 
-// #TODO - On Click of notification it should take us to the Website
-// #TODO - Show Total Break Time
-// #TODO - Add a feature to Copy the Total Duration to Clipboard
-// #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard
-// #TODO - Add a feature to Copy the Overtime to Clipboard
-// #TODO - Add a feature to Copy the Remaining Time to Clipboard
-// #TODO - Add a feature to Show Total Break Duration in UI
+// #TODO - Introduce Half Day Mode
+// #TODO - On Click of notification it should take us to the Website (TEST)
+// #TODO - Add a feature to Show Total Break Duration in UI (DONE)
+// #TODO - Add a feature to Copy the Total Duration to Clipboard (DONE)
+// #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard (DONE)
+// #TODO - Add a feature to Copy the Overtime to Clipboard (DONE)
+// #TODO - Add a feature to Copy the Remaining Time to Clipboard (DONE)
 
 (function () {
     'use strict';
@@ -83,10 +83,18 @@
 
     function showNotification(message) {
         if (Notification.permission === 'granted') {
-            new Notification('Keka Time Alert', {
+            const notification = new Notification('Keka Time Alert', {
                 body: message,
-                icon: 'https://www.google.com/s2/favicons?sz=64&domain=keka.com'
+                icon: 'https://www.google.com/s2/favicons?sz=64&domain=keka.com',
+                tag: 'keka-time-alert'
             });
+            
+            // Add click handler to take user to Keka website
+            notification.onclick = function() {
+                window.focus();
+                // window.location.href = 'https://ezeetechnosys.keka.com/';
+                notification.close();
+            };
         }
     }
 
@@ -378,7 +386,8 @@
             blue: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
             green: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
             orange: 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)',
-            completed: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)'
+            completed: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
+            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)'
         };
 
         let totalDisplay = container.querySelector('.total-duration-display');
@@ -445,7 +454,7 @@
                     font-size: 24px;
                 }
             </style>
-            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
                     <div class="spark-icon">⏱️</div>
                     <div class="metric-label">Total Duration</div>
@@ -467,6 +476,13 @@
                     <div class="metric-value">${remainingTimeStr}</div>
                 </div>
             </div>
+            <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
+                <div class="metric-card" style="background: ${gradients.pink}" onclick="this.dispatchEvent(new CustomEvent('copyBreakTime', {bubbles: true}))">
+                    <div class="spark-icon">☕</div>
+                    <div class="metric-label">Total Break Duration</div>
+                    <div class="metric-value">${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min</div>
+                </div>
+            </div>
         `;
 
         // Add event listeners for copying
@@ -481,6 +497,9 @@
         
         totalDisplay.addEventListener('copyRemaining', () => 
             copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeStr)));
+            
+        totalDisplay.addEventListener('copyBreakTime', () => 
+            copyToClipboard(formatCopyText('☕', 'Total Break Duration', `${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min`)));
 
         // Add colorful styling to break duration badges
         const breakInfoElements = container.querySelectorAll('.break-info');
