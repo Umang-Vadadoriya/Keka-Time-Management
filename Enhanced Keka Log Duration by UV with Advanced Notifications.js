@@ -29,6 +29,7 @@
 // ==/UserScript==
 
 
+// #TODO - Introduce Half Day Mode
 // #TODO - On Click of notification it should take us to the Website (TEST)
 // #TODO - Add a feature to Show Total Break Duration in UI (DONE)
 // #TODO - Add a feature to Copy the Total Duration to Clipboard (DONE)
