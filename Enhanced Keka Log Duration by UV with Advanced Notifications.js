@@ -36,6 +36,8 @@
 // #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard (DONE)
 // #TODO - Add a feature to Copy the Overtime to Clipboard (DONE)
 // #TODO - Add a feature to Copy the Remaining Time to Clipboard (DONE)
+// #TODO - Add Work Hours Individual Logs Same as Break Time Logs (CONSIDERING)
+// #TODO - Add Day Mode Full/Half Auto Detection and Manual Selection (CONSIDERING)
 
 (function () {
     'use strict';
