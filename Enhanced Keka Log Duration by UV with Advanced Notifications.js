@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      6.2
+// @version      6.3
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -48,6 +48,7 @@
     let notificationInterval = null;
     let totalBreakTimeMinutes = 0;
     let notificationCounter = 0;
+    let isUpdating = false;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
@@ -363,7 +364,8 @@
     }
 
     const updateUI = debounce((container) => {
-        if (!container) return;
+        if (!container || isUpdating) return;
+        isUpdating = true;
         const modalDialog = document.querySelector('.modal-dialog.right-modal.right-modal-450');
         if (modalDialog) {
             modalDialog.style.width = '500px';
@@ -521,6 +523,7 @@
                 "`
             );
         });
+        isUpdating = false;
     }, 250);
 
     // Add styles for break duration indicators
@@ -537,6 +540,8 @@
 
     // Initialize observer
     const observer = new MutationObserver(mutations => {
+        if (isUpdating) return;
+        
         const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
 
         if (container && !modalOpen) {
