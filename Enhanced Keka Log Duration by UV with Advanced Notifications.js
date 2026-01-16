@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      6.3
+// @version      7.0
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -36,7 +36,7 @@
 // #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard (DONE)
 // #TODO - Add a feature to Copy the Overtime to Clipboard (DONE)
 // #TODO - Add a feature to Copy the Remaining Time to Clipboard (DONE)
-// #TODO - Add Work Hours Individual Logs Same as Break Time Logs (CONSIDERING)
+// #TODO - Add Work Hours Individual Logs Same as Break Time Logs (DONE)
 // #TODO - Add Day Mode Full/Half Auto Detection and Manual Selection (CONSIDERING)
 
 (function () {
@@ -168,22 +168,98 @@
             const duration = calculateDuration(startTime, endTime);
             totalMinutes += duration.hours * 60 + duration.minutes;
 
-            if (index !== 0 && brekduration && renderOnUI) {
-                const breakInfoElement = row.querySelector('.break-info') || document.createElement('div');
-                breakInfoElement.className = 'break-info';
-                breakInfoElement.innerHTML = `
-                    <div class="break-duration-badge" style="
-                        background: #f1f5f9;
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 12px;
-                        color: #64748b;
-                        margin-left: 10px;
-                    ">
-                        Break: ${brekduration.hours}h ${brekduration.minutes}m
-                    </div>`;
-                if (!row.querySelector('.break-info')) {
-                    row.appendChild(breakInfoElement);
+            if (renderOnUI) {
+                const durationInfoElement = row.querySelector('.duration-info') || document.createElement('div');
+                durationInfoElement.className = 'duration-info';
+                
+                // Format time text
+                const workText = `${duration.hours}h ${duration.minutes}m`;
+                const breakText = brekduration ? `${brekduration.hours}h ${brekduration.minutes}m` : null;
+                
+                // For rows with work + break: show dual capsule
+                if (brekduration && index !== 0) {
+                    durationInfoElement.innerHTML = `
+                        <div class="duration-capsule dual-capsule" style="
+                            display: inline-flex;
+                            border-radius: 20px;
+                            margin-left: 10px;
+                            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                            position: relative;
+                            height: 28px;
+                            width: 120px;
+                            overflow: visible;
+                        ">
+                            <div class="work-side" style="
+                                background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+                                padding: 6px 12px;
+                                font-size: 12px;
+                                color: white;
+                                font-weight: 500;
+                                transition: all 0.3s ease;
+                                white-space: nowrap;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                cursor: pointer;
+                                width: 60px;
+                                position: absolute;
+                                left: 0;
+                                top: 0;
+                                height: 100%;
+                                border-radius: 20px 0 0 20px;
+                                overflow: hidden;
+                            " data-work="${workText}" title="Work: ${workText}">
+                                <span class="work-text">${workText}</span>
+                            </div>
+                            <div class="break-side" style="
+                                background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+                                padding: 6px 12px;
+                                font-size: 12px;
+                                color: white;
+                                font-weight: 500;
+                                transition: all 0.3s ease;
+                                white-space: nowrap;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                cursor: pointer;
+                                width: 60px;
+                                position: absolute;
+                                right: 0;
+                                top: 0;
+                                height: 100%;
+                                border-radius: 0 20px 20px 0;
+                                overflow: hidden;
+                            " data-break="${breakText}" title="Break: ${breakText}">
+                                <span class="break-text">${breakText}</span>
+                            </div>
+                        </div>`;
+                } 
+                // For any row without break time: show full-width work capsule
+                else {
+                    durationInfoElement.innerHTML = `
+                        <div class="duration-capsule work-only" style="
+                            background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+                            padding: 6px 12px;
+                            border-radius: 20px;
+                            font-size: 12px;
+                            color: white;
+                            margin-left: 10px;
+                            font-weight: 500;
+                            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                            display: inline-flex;
+                            align-items: center;
+                            justify-content: center;
+                            width: 120px;
+                            height: 28px;
+                            cursor: default;
+                        ">
+                            Work: ${workText}
+                        </div>`;
+                }
+                
+                if (!row.querySelector('.duration-info')) {
+                    row.appendChild(durationInfoElement);
                 }
             }
         });
@@ -505,35 +581,32 @@
         totalDisplay.addEventListener('copyBreakTime', () => 
             copyToClipboard(formatCopyText('☕', 'Total Break Duration', `${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min`)));
 
-        // Add colorful styling to break duration badges
-        const breakInfoElements = container.querySelectorAll('.break-info');
-        breakInfoElements.forEach((element, index) => {
-            element.innerHTML = element.innerHTML.replace(
-                'class="break-duration-badge"',
-                `class="break-duration-badge" style="
-                    background: ${gradients.blue};
-                    padding: 6px 12px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                    color: white;
-                    margin-left: 10px;
-                    font-weight: 500;
-                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                    display: inline-block;
-                "`
-            );
-        });
         isUpdating = false;
     }, 250);
 
-    // Add styles for break duration indicators
+    // Add styles for duration capsules
     const style = document.createElement('style');
     style.textContent = `
-            .break-duration-badge {
-                transition: transform 0.2s ease-in-out;
+            .dual-capsule .work-side:hover {
+                width: 120px !important;
+                z-index: 10;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+                border-radius: 20px !important;
             }
-            .break-duration-badge:hover {
-                transform: translateY(-1px);
+            
+            .dual-capsule .break-side:hover {
+                width: 120px !important;
+                z-index: 10;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+                border-radius: 20px !important;
+            }
+            
+            .dual-capsule .work-side:hover .work-text::before {
+                content: 'Work: ';
+            }
+            
+            .dual-capsule .break-side:hover .break-text::before {
+                content: 'Break: ';
             }
         `;
     document.head.appendChild(style);
