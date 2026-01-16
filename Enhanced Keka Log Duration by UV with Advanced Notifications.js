@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      9.2
+// @version      9.3
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -786,6 +786,17 @@
                     <div class="metric-label">Total Break Duration</div>
                     <div class="metric-value">${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min</div>
                 </div>
+            </div>
+            <div style="
+                text-align: center;
+                margin-top: 16px;
+                padding-top: 16px;
+                border-top: 1px solid #e2e8f0;
+                font-size: 11px;
+                color: #94a3b8;
+                font-weight: 500;
+            ">
+                Enhanced by <span style="color: #7c3aed; font-weight: 600;">UV</span> ✨
             </div>
         `;
 
