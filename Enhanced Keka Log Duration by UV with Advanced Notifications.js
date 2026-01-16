@@ -2,15 +2,15 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      9.3
+// @version      9.4
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
 // @tag          utility
 // @tag          automation
-// @match        https://yanoljacloudsolution.keka.com/*
-// @include      https://yanoljacloudsolution.keka.com/*
-// @exclude      https://yanoljacloudsolution.keka.com/login*
+// @match        https://*.keka.com/*
+// @include      https://*.keka.com/*
+// @exclude      https://*.keka.com/login*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=keka.com
 // @grant        GM_notification
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
@@ -842,6 +842,11 @@
             
             .dual-capsule .break-side:hover .break-text::before {
                 content: 'Break: ';
+            }
+            
+            /* Override max-height for attendance logs container */
+            div[formarrayname="premises"].max-h-500 {
+                max-height: 100% !important;
             }
         `;
     document.head.appendChild(style);
