@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      7.0
+// @version      9.2
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -37,7 +37,7 @@
 // #TODO - Add a feature to Copy the Overtime to Clipboard (DONE)
 // #TODO - Add a feature to Copy the Remaining Time to Clipboard (DONE)
 // #TODO - Add Work Hours Individual Logs Same as Break Time Logs (DONE)
-// #TODO - Add Day Mode Full/Half Auto Detection and Manual Selection (CONSIDERING)
+// #TODO - Add Day Mode Full/Half Auto Detection and Manual Selection (DONE)
 
 (function () {
     'use strict';
@@ -49,10 +49,18 @@
     let totalBreakTimeMinutes = 0;
     let notificationCounter = 0;
     let isUpdating = false;
+    let isHalfDayMode = false;
+    let isHalfDayAutoDetected = false;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
+    const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
+    
+    // Get target hours based on mode
+    function getTargetHours() {
+        return isHalfDayMode ? FOUR_HOURS_IN_MINUTES : EIGHT_HOURS_IN_MINUTES;
+    }
 
     // Notification messages array
     const NOTIFICATION_MESSAGES = [
@@ -275,7 +283,7 @@
         };
     }
 
-    function calculateEightHourCompletion(firstStartTime, totalWorkedHours, totalBreakTime) {
+    function calculateTargetCompletion(firstStartTime, totalWorkedHours, totalBreakTime) {
         if (!firstStartTime) return { completionTime: 'N/A', overtime: 'N/A' };
 
         const start = parseTime(firstStartTime);
@@ -284,21 +292,21 @@
         const startDate = new Date();
         startDate.setHours(start.hours, start.minutes, 0);
 
-        const eightHoursInMinutes = 8 * 60;
+        const targetMinutes = getTargetHours();
         const totalWorkedMinutes = totalWorkedHours * 60;
 
-        const completionDate = new Date(startDate.getTime() + (eightHoursInMinutes * 60 * 1000) + (totalBreakTime * 60 * 1000));
+        const completionDate = new Date(startDate.getTime() + (targetMinutes * 60 * 1000) + (totalBreakTime * 60 * 1000));
         let completionTime = completionDate.toLocaleTimeString('en-IN', {
             hour: '2-digit',
             minute: '2-digit',
             hour12: true
         });
 
-        if (totalWorkedMinutes >= eightHoursInMinutes) {
+        if (totalWorkedMinutes >= targetMinutes) {
             completionTime += ' (Completed ✓)';
         }
 
-        const overtimeMinutes = totalWorkedMinutes > eightHoursInMinutes ? totalWorkedMinutes - eightHoursInMinutes : 0;
+        const overtimeMinutes = totalWorkedMinutes > targetMinutes ? totalWorkedMinutes - targetMinutes : 0;
         const overtimeHours = Math.floor(overtimeMinutes / 60);
         const overtimeMins = Math.floor(overtimeMinutes % 60);
         const overtime = overtimeMinutes > 0 ? `${overtimeHours} Hr ${overtimeMins} Min` : 'No overtime';
@@ -307,7 +315,8 @@
     }
 
     function formatSimpleRemainingTime(minutes) {
-        if (minutes <= 0) return "8 hours completed! 🎉";
+        const targetHours = isHalfDayMode ? 4 : 8;
+        if (minutes <= 0) return `${targetHours} hours completed! 🎉`;
 
         const hours = Math.floor(minutes / 60);
         const mins = minutes % 60;
@@ -322,7 +331,6 @@
     }
 
     function calculateRemainingTime(startTimeStr, breakTimeMinutes) {
-        // TODO - Handle Calculation Based On Last Start Time
         const start = parseTime(startTimeStr);
         if (!start) return null;
 
@@ -334,11 +342,12 @@
         if (elapsedMinutes < 0) elapsedMinutes += 24 * 60;
 
         const effectiveWorkMinutes = elapsedMinutes - breakTimeMinutes;
-        const remainingMinutes = EIGHT_HOURS_IN_MINUTES - effectiveWorkMinutes;
+        const targetMinutes = getTargetHours();
+        const remainingMinutes = targetMinutes - effectiveWorkMinutes;
 
         return {
             remaining: Math.max(0, remainingMinutes),
-            completed: effectiveWorkMinutes >= EIGHT_HOURS_IN_MINUTES,
+            completed: effectiveWorkMinutes >= targetMinutes,
             overtime: Math.min(0, remainingMinutes)
         };
     }
@@ -412,8 +421,9 @@
                     const timeStr = formatSimpleRemainingTime(remainingTime.remaining);
                     showNotification(getRandomNotificationMessage(timeStr));
                 } else if (remainingTime.completed && remainingTime.remaining === 0) {
-                    // Notify when exactly 8 hours are completed
-                    showNotification("Congratulations! You've completed your 8-hour workday! 🎉");
+                    // Notify when target hours are completed
+                    const targetHours = isHalfDayMode ? 4 : 8;
+                    showNotification(`Congratulations! You've completed your ${targetHours}-hour workday! 🎉`);
                 }
             }
             updateUI(container);
@@ -439,6 +449,111 @@
         return `${emoji}\n${label}:\n${value}`;
     }
 
+    function detectHalfDayMode() {
+        try {
+            console.log('=== Starting Half-Day Detection ===');
+            
+            // Get the selected date with multiple attempts
+            let selectedDateInput = document.querySelector('input[formcontrolname="selectedDate"]');
+            
+            // Try alternative selectors
+            if (!selectedDateInput) {
+                selectedDateInput = document.querySelector('input[name="selectedDate"]');
+            }
+            if (!selectedDateInput) {
+                selectedDateInput = document.querySelector('.modal-body input[type="text"]');
+            }
+            
+            if (!selectedDateInput) {
+                console.log('⚠️ No selected date input found, trying alternative method...');
+                
+                // Alternative: Get date from modal header or title
+                const modalHeader = document.querySelector('.modal-header, .modal-title');
+                if (modalHeader) {
+                    console.log('Modal header text:', modalHeader.textContent);
+                }
+                
+                // Check all attendance rows for LEAVE
+                const allRows = document.querySelectorAll('.on-hover, .attendance-log-row, [class*="border-bottom"]');
+                console.log(`Checking ${allRows.length} attendance rows for LEAVE`);
+                
+                for (const row of allRows) {
+                    const rowText = row.textContent || '';
+                    
+                    // Check if this row has LEAVE and was recently clicked
+                    if (rowText.includes('LEAVE') || rowText.includes('Leave')) {
+                        // Check if modal is currently open
+                        const modalOpen = document.querySelector('.modal.show, .modal.fade.show');
+                        if (modalOpen) {
+                            console.log('Found LEAVE row with modal open:', rowText.substring(0, 100));
+                            console.log('✅ LEAVE detected via alternative method!');
+                            return true;
+                        }
+                    }
+                }
+                
+                console.log('❌ No LEAVE detected via alternative method');
+                return false;
+            }
+            
+            const selectedDateValue = selectedDateInput.value;
+            console.log('Selected date:', selectedDateValue);
+            
+            if (!selectedDateValue) {
+                console.log('Selected date is empty');
+                return false;
+            }
+            
+            // Parse the date
+            const dateMatch = selectedDateValue.match(/(\d+)\s+(\w+)\s+(\d+)/);
+            if (!dateMatch) {
+                console.log('Could not parse date:', selectedDateValue);
+                return false;
+            }
+            
+            const [, day, month, year] = dateMatch;
+            console.log('Parsed date:', { day, month, year });
+            
+            // Check all possible attendance row selectors
+            const rowSelectors = [
+                '.on-hover',
+                '.attendance-log-row',
+                '[class*="border-bottom"]',
+                '.d-flex.align-items-center.px-16.py-12'
+            ];
+            
+            for (const selector of rowSelectors) {
+                const rows = document.querySelectorAll(selector);
+                console.log(`Checking ${rows.length} rows with selector: ${selector}`);
+                
+                for (const row of rows) {
+                    const rowText = row.textContent || '';
+                    
+                    // Check if this row matches our date
+                    const hasMonth = rowText.includes(month);
+                    const hasDay = rowText.includes(day) || rowText.includes(parseInt(day).toString());
+                    
+                    if (hasMonth && hasDay) {
+                        console.log('Found matching row:', rowText.substring(0, 150));
+                        
+                        // Check for LEAVE keyword
+                        if (rowText.includes('LEAVE') || rowText.includes('Leave')) {
+                            console.log('✅ LEAVE detected! Activating half-day mode');
+                            return true;
+                        }
+                    }
+                }
+            }
+            
+            console.log('❌ No LEAVE found for this date');
+            return false;
+            
+        } catch (error) {
+            console.error('Error in detectHalfDayMode:', error);
+            return false;
+        }
+    }
+
     const updateUI = debounce((container) => {
         if (!container || isUpdating) return;
         isUpdating = true;
@@ -450,7 +565,7 @@
         const results = processTimeEntries(container);
         if (!results) return;
 
-        const { completionTime, overtime } = calculateEightHourCompletion(
+        const { completionTime, overtime } = calculateTargetCompletion(
             results.firstStartTime,
             results.totalHours,
             results.breakTime
@@ -458,6 +573,7 @@
 
         const remainingTime = calculateRemainingTime(results.firstStartTime, results.breakTime);
         const remainingTimeStr = remainingTime ? formatSimpleRemainingTime(remainingTime.remaining) : 'N/A';
+        const targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
         document.title = `${results.totalDuration}`;
 
         // Define gradient backgrounds
@@ -486,6 +602,101 @@
         }
 
         const isCompleted = remainingTime && remainingTime.completed;
+
+        // Insert day mode toggle next to Selected Date field
+        const selectedDateFormGroup = document.querySelector('.modal-body .form-group');
+        if (selectedDateFormGroup && !selectedDateFormGroup.querySelector('.day-mode-capsule')) {
+            // Keep form-group as block, but wrap input and toggle together
+            const label = selectedDateFormGroup.querySelector('label');
+            const inputField = selectedDateFormGroup.querySelector('input');
+            
+            if (label) {
+                label.style.display = 'block';
+                label.style.marginBottom = '8px';
+            }
+            
+            // Create wrapper for input and toggle
+            const inputWrapper = document.createElement('div');
+            inputWrapper.className = 'input-toggle-wrapper';
+            inputWrapper.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                position: relative;
+            `;
+            
+            if (inputField) {
+                // Preserve original classes and add our custom class
+                const originalClasses = inputField.className;
+                inputField.className = originalClasses + ' input-with-toggle';
+                inputField.style.width = '100%';
+                inputField.style.transition = 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                // Wrap the input
+                inputField.parentNode.insertBefore(inputWrapper, inputField);
+                inputWrapper.appendChild(inputField);
+            }
+            
+            const capsuleHTML = `
+                <div class="day-mode-capsule" data-toggle-initialized="false" style="
+                    position: relative;
+                    width: 50px;
+                    height: 32px;
+                    background: linear-gradient(135deg, ${isHalfDayMode ? '#f97316 0%, #ea580c 100%' : '#3b82f6 0%, #2563eb 100%'});
+                    border-radius: 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                    overflow: hidden;
+                    flex-shrink: 0;
+                ">
+                    <span class="mode-icon" style="font-size: 18px; transition: opacity 0.3s ease; z-index: 2;">${isHalfDayMode ? '🌗' : '☀️'}</span>
+                    <span class="mode-full-text" style="
+                        position: absolute;
+                        font-size: 12px;
+                        color: white;
+                        font-weight: 600;
+                        white-space: nowrap;
+                        opacity: 0;
+                        transition: opacity 0.3s ease;
+                        pointer-events: none;
+                    ">${isHalfDayMode ? '🌗 Half Day' : '☀️ Full Day'}${isHalfDayAutoDetected ? ' (Auto)' : ''}</span>
+                </div>
+            `;
+            
+            inputWrapper.insertAdjacentHTML('beforeend', capsuleHTML);
+            
+            // Add event listener to the capsule (only once)
+            const capsule = inputWrapper.querySelector('.day-mode-capsule');
+            if (capsule && capsule.getAttribute('data-toggle-initialized') === 'false') {
+                capsule.addEventListener('click', () => {
+                    isHalfDayMode = !isHalfDayMode;
+                    isHalfDayAutoDetected = false;
+                    updateUI(container);
+                });
+                capsule.setAttribute('data-toggle-initialized', 'true');
+            }
+        } else if (selectedDateFormGroup) {
+            // Update existing capsule
+            const existingCapsule = selectedDateFormGroup.querySelector('.day-mode-capsule');
+            if (existingCapsule) {
+                existingCapsule.style.background = `linear-gradient(135deg, ${isHalfDayMode ? '#f97316 0%, #ea580c 100%' : '#3b82f6 0%, #2563eb 100%'})`;
+                const modeIcon = existingCapsule.querySelector('.mode-icon');
+                const modeText = existingCapsule.querySelector('.mode-full-text');
+                if (modeIcon) modeIcon.textContent = isHalfDayMode ? '🌗' : '☀️';
+                if (modeText) modeText.textContent = `${isHalfDayMode ? '🌗 Half Day' : '☀️ Full Day'}${isHalfDayAutoDetected ? ' (Auto)' : ''}`;
+            }
+            
+            // Ensure input field styling is maintained
+            const inputField = selectedDateFormGroup.querySelector('input');
+            if (inputField && !inputField.classList.contains('input-with-toggle')) {
+                inputField.classList.add('input-with-toggle');
+                inputField.style.width = '100%';
+                inputField.style.transition = 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+            }
+        }
 
         totalDisplay.innerHTML = `
             <style>
@@ -533,6 +744,19 @@
                     opacity: 0.2;
                     font-size: 24px;
                 }
+                .day-mode-capsule:hover {
+                    width: 160px !important;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15) !important;
+                }
+                .day-mode-capsule:hover .mode-icon {
+                    opacity: 0;
+                }
+                .day-mode-capsule:hover .mode-full-text {
+                    opacity: 1 !important;
+                }
+                .input-toggle-wrapper:has(.day-mode-capsule:hover) .input-with-toggle {
+                    width: calc(100% - 172px) !important;
+                }
             </style>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
@@ -542,7 +766,7 @@
                 </div>
                 <div class="metric-card" style="background: ${gradients.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
                     <div class="spark-icon">🎯</div>
-                    <div class="metric-label">8hr Completion</div>
+                    <div class="metric-label">${targetHoursLabel} Completion</div>
                     <div class="metric-value">${completionTime}</div>
                 </div>
                 <div class="metric-card" style="background: ${gradients.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
@@ -570,7 +794,7 @@
             copyToClipboard(formatCopyText('⏱️', 'Total Duration', results.totalDuration)));
         
         totalDisplay.addEventListener('copyCompletion', () => 
-            copyToClipboard(formatCopyText('🎯', '8hr Completion', completionTime)));
+            copyToClipboard(formatCopyText('🎯', `${targetHoursLabel} Completion`, completionTime)));
         
         totalDisplay.addEventListener('copyOvertime', () => 
             copyToClipboard(formatCopyText('⭐', 'Overtime', overtime)));
@@ -619,10 +843,27 @@
 
         if (container && !modalOpen) {
             modalOpen = true;
+            
+            // Initialize with default state immediately (no lag)
+            isHalfDayMode = false;
+            isHalfDayAutoDetected = false;
             updateUI(container);
+            
+            // Detect half-day mode in background and update if needed
+            setTimeout(() => {
+                const wasHalfDay = detectHalfDayMode();
+                if (wasHalfDay !== isHalfDayMode) {
+                    isHalfDayAutoDetected = wasHalfDay;
+                    isHalfDayMode = wasHalfDay;
+                    updateUI(container);
+                }
+            }, 100); // Reduced delay
+            
             startBackgroundNotifications();
         } else if (!container && modalOpen) {
             modalOpen = false;
+            isHalfDayMode = false;
+            isHalfDayAutoDetected = false;
             stopBackgroundNotifications();
         }
     });
