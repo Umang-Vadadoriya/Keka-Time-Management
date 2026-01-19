@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      9.9
+// @version      10.0
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
