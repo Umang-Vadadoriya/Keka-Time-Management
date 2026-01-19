@@ -16,8 +16,8 @@
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @run-at       document-end
 // @source       https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
-// @updateURL    https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/072ef21d2761e60d7b99f1b6d4c1fcd3e89b50f9/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
-// @downloadURL  https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/072ef21d2761e60d7b99f1b6d4c1fcd3e89b50f9/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
+// @updateURL    https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
+// @downloadURL  https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
 // @supportURL   https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management/issues
 // @homepage     https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
 // @compatible   firefox
