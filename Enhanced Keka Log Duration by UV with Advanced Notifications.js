@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      9.4
+// @version      9.9
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -16,8 +16,8 @@
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @run-at       document-end
 // @source       https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
-// @updateURL    https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV%20with%20Advanced%20Notifications.js
-// @downloadURL  https://raw.githubusercontent.com/Umang-Vadadoriya-YCS/Keka-Time-Management/refs/heads/master/Enhanced%20Keka%20Log%20Duration%20by%20UV%20with%20Advanced%20Notifications.js
+// @updateURL    https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/072ef21d2761e60d7b99f1b6d4c1fcd3e89b50f9/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
+// @downloadURL  https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/072ef21d2761e60d7b99f1b6d4c1fcd3e89b50f9/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
 // @supportURL   https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management/issues
 // @homepage     https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
 // @compatible   firefox
@@ -100,10 +100,9 @@
                 tag: 'keka-time-alert'
             });
             
-            // Add click handler to take user to Keka website
-            notification.onclick = function() {
+            // Add click handler to focus window
+            notification.onclick = () => {
                 window.focus();
-                // window.location.href = 'https://ezeetechnosys.keka.com/';
                 notification.close();
             };
         }
@@ -176,99 +175,20 @@
             const duration = calculateDuration(startTime, endTime);
             totalMinutes += duration.hours * 60 + duration.minutes;
 
-            if (renderOnUI) {
-                const durationInfoElement = row.querySelector('.duration-info') || document.createElement('div');
+            if (renderOnUI && !row.querySelector('.duration-info')) {
+                const durationInfoElement = document.createElement('div');
                 durationInfoElement.className = 'duration-info';
                 
-                // Format time text
                 const workText = `${duration.hours}h ${duration.minutes}m`;
                 const breakText = brekduration ? `${brekduration.hours}h ${brekduration.minutes}m` : null;
                 
-                // For rows with work + break: show dual capsule
                 if (brekduration && index !== 0) {
-                    durationInfoElement.innerHTML = `
-                        <div class="duration-capsule dual-capsule" style="
-                            display: inline-flex;
-                            border-radius: 20px;
-                            margin-left: 10px;
-                            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                            position: relative;
-                            height: 28px;
-                            width: 120px;
-                            overflow: visible;
-                        ">
-                            <div class="work-side" style="
-                                background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
-                                padding: 6px 12px;
-                                font-size: 12px;
-                                color: white;
-                                font-weight: 500;
-                                transition: all 0.3s ease;
-                                white-space: nowrap;
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                cursor: pointer;
-                                width: 60px;
-                                position: absolute;
-                                left: 0;
-                                top: 0;
-                                height: 100%;
-                                border-radius: 20px 0 0 20px;
-                                overflow: hidden;
-                            " data-work="${workText}" title="Work: ${workText}">
-                                <span class="work-text">${workText}</span>
-                            </div>
-                            <div class="break-side" style="
-                                background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
-                                padding: 6px 12px;
-                                font-size: 12px;
-                                color: white;
-                                font-weight: 500;
-                                transition: all 0.3s ease;
-                                white-space: nowrap;
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                cursor: pointer;
-                                width: 60px;
-                                position: absolute;
-                                right: 0;
-                                top: 0;
-                                height: 100%;
-                                border-radius: 0 20px 20px 0;
-                                overflow: hidden;
-                            " data-break="${breakText}" title="Break: ${breakText}">
-                                <span class="break-text">${breakText}</span>
-                            </div>
-                        </div>`;
-                } 
-                // For any row without break time: show full-width work capsule
-                else {
-                    durationInfoElement.innerHTML = `
-                        <div class="duration-capsule work-only" style="
-                            background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
-                            padding: 6px 12px;
-                            border-radius: 20px;
-                            font-size: 12px;
-                            color: white;
-                            margin-left: 10px;
-                            font-weight: 500;
-                            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                            display: inline-flex;
-                            align-items: center;
-                            justify-content: center;
-                            width: 120px;
-                            height: 28px;
-                            cursor: default;
-                        ">
-                            Work: ${workText}
-                        </div>`;
+                    durationInfoElement.innerHTML = `<div class="duration-capsule dual-capsule"><div class="work-side" data-work="${workText}" title="Work: ${workText}"><span class="work-text">${workText}</span></div><div class="break-side" data-break="${breakText}" title="Break: ${breakText}"><span class="break-text">${breakText}</span></div></div>`;
+                } else {
+                    durationInfoElement.innerHTML = `<div class="duration-capsule work-only">Work: ${workText}</div>`;
                 }
                 
-                if (!row.querySelector('.duration-info')) {
-                    row.appendChild(durationInfoElement);
-                }
+                row.appendChild(durationInfoElement);
             }
         });
 
@@ -353,35 +273,21 @@
     }
 
     function shouldNotify(remaining) {
-        // For regular workday remaining time
-        const hourNotifications = [8, 7, 6, 5, 4, 3, 2];
-        const minuteNotifications = [60, 50, 40, 30, 20, 15, 10, 5, 0];
-
-        // Convert remaining minutes to hours and minutes
         const hours = Math.floor(remaining / 60);
         const minutes = remaining % 60;
-
-        // Check if current time matches any notification point
-        return hourNotifications.includes(hours) && minutes === 0 ||
-               hours === 0 && minuteNotifications.includes(minutes);
+        return (hours >= 2 && hours <= 8 && minutes === 0) || 
+               (hours === 0 && [60, 50, 40, 30, 20, 15, 10, 5, 0].includes(minutes));
     }
 
     function shouldNotifyOvertime(overtimeMinutes) {
-        // For overtime notifications
-        const overtimeHourNotifications = [1, 2, 3, 4, 5];
-        const overtimeMinuteNotifications = [5, 10, 15, 20, 25, 30];
-
         const hours = Math.floor(overtimeMinutes / 60);
         const minutes = overtimeMinutes % 60;
-
-        return overtimeHourNotifications.includes(hours) && minutes === 0 ||
-               hours === 0 && overtimeMinuteNotifications.includes(minutes);
+        return (hours >= 1 && hours <= 5 && minutes === 0) || 
+               (hours === 0 && [5, 10, 15, 20, 25, 30].includes(minutes));
     }
 
     function startBackgroundNotifications() {
-        if (notificationInterval) {
-            clearInterval(notificationInterval);
-        }
+        if (notificationInterval) clearInterval(notificationInterval);
 
         const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
         if (!container) return;
@@ -390,41 +296,27 @@
         if (!firstStartElement) return;
 
         lastStartTime = firstStartElement.textContent.trim();
-
-
-        // Calculate initial break time
         const results = processTimeEntries(container, false);
         totalBreakTimeMinutes = results ? results.breakTime : 0;
 
         notificationInterval = setInterval(() => {
             const remainingTime = calculateRemainingTime(lastStartTime, totalBreakTimeMinutes);
+            if (!remainingTime) return;
 
-            if (remainingTime) {
-                if (remainingTime.overtime < 0) {
-                    // Handle overtime notifications
-                    const overtimeMinutes = Math.abs(remainingTime.overtime);
-                    if (shouldNotifyOvertime(overtimeMinutes)) {
-                        const hours = Math.floor(overtimeMinutes / 60);
-                        const minutes = overtimeMinutes % 60;
-                        let message = "You're working overtime! ";
-                        if (hours > 0) {
-                            message += `${hours} hour${hours > 1 ? 's' : ''} `;
-                        }
-                        if (minutes > 0) {
-                            message += `${minutes} minute${minutes > 1 ? 's' : ''} `;
-                        }
-                        message += "extra! 🚀";
-                        showNotification(message);
-                    }
-                } else if (!remainingTime.completed && shouldNotify(remainingTime.remaining)) {
-                    // Handle regular workday notifications
-                    const timeStr = formatSimpleRemainingTime(remainingTime.remaining);
-                    showNotification(getRandomNotificationMessage(timeStr));
-                } else if (remainingTime.completed && remainingTime.remaining === 0) {
-                    // Notify when target hours are completed
-                    const targetHours = isHalfDayMode ? 4 : 8;
-                    showNotification(`Congratulations! You've completed your ${targetHours}-hour workday! 🎉`);
+            if (remainingTime.overtime < 0) {
+                const overtimeMinutes = Math.abs(remainingTime.overtime);
+                if (shouldNotifyOvertime(overtimeMinutes)) {
+                    const hours = Math.floor(overtimeMinutes / 60);
+                    const minutes = overtimeMinutes % 60;
+                    let msg = "You're working overtime! ";
+                    if (hours > 0) msg += `${hours} hour${hours > 1 ? 's' : ''} `;
+                    if (minutes > 0) msg += `${minutes} minute${minutes > 1 ? 's' : ''} `;
+                    showNotification(msg + "extra! 🚀");
                 }
+            } else if (!remainingTime.completed && shouldNotify(remainingTime.remaining)) {
+                showNotification(getRandomNotificationMessage(formatSimpleRemainingTime(remainingTime.remaining)));
+            } else if (remainingTime.completed && remainingTime.remaining === 0) {
+                showNotification(`Congratulations! You've completed your ${isHalfDayMode ? 4 : 8}-hour workday! 🎉`);
             }
             updateUI(container);
         }, NOTIFICATION_INTERVAL * 60 * 1000);
@@ -451,7 +343,6 @@
 
     function detectHalfDayMode() {
         try {
-            console.log('=== Starting Half-Day Detection ===');
             
             // Get the selected date with multiple attempts
             let selectedDateInput = document.querySelector('input[formcontrolname="selectedDate"]');
@@ -465,17 +356,14 @@
             }
             
             if (!selectedDateInput) {
-                console.log('⚠️ No selected date input found, trying alternative method...');
                 
                 // Alternative: Get date from modal header or title
                 const modalHeader = document.querySelector('.modal-header, .modal-title');
                 if (modalHeader) {
-                    console.log('Modal header text:', modalHeader.textContent);
                 }
                 
                 // Check all attendance rows for LEAVE
                 const allRows = document.querySelectorAll('.on-hover, .attendance-log-row, [class*="border-bottom"]');
-                console.log(`Checking ${allRows.length} attendance rows for LEAVE`);
                 
                 for (const row of allRows) {
                     const rowText = row.textContent || '';
@@ -485,34 +373,27 @@
                         // Check if modal is currently open
                         const modalOpen = document.querySelector('.modal.show, .modal.fade.show');
                         if (modalOpen) {
-                            console.log('Found LEAVE row with modal open:', rowText.substring(0, 100));
-                            console.log('✅ LEAVE detected via alternative method!');
                             return true;
                         }
                     }
                 }
                 
-                console.log('❌ No LEAVE detected via alternative method');
                 return false;
             }
             
             const selectedDateValue = selectedDateInput.value;
-            console.log('Selected date:', selectedDateValue);
             
             if (!selectedDateValue) {
-                console.log('Selected date is empty');
                 return false;
             }
             
             // Parse the date
             const dateMatch = selectedDateValue.match(/(\d+)\s+(\w+)\s+(\d+)/);
             if (!dateMatch) {
-                console.log('Could not parse date:', selectedDateValue);
                 return false;
             }
             
             const [, day, month, year] = dateMatch;
-            console.log('Parsed date:', { day, month, year });
             
             // Check all possible attendance row selectors
             const rowSelectors = [
@@ -524,7 +405,6 @@
             
             for (const selector of rowSelectors) {
                 const rows = document.querySelectorAll(selector);
-                console.log(`Checking ${rows.length} rows with selector: ${selector}`);
                 
                 for (const row of rows) {
                     const rowText = row.textContent || '';
@@ -534,18 +414,15 @@
                     const hasDay = rowText.includes(day) || rowText.includes(parseInt(day).toString());
                     
                     if (hasMonth && hasDay) {
-                        console.log('Found matching row:', rowText.substring(0, 150));
                         
                         // Check for LEAVE keyword
                         if (rowText.includes('LEAVE') || rowText.includes('Leave')) {
-                            console.log('✅ LEAVE detected! Activating half-day mode');
                             return true;
                         }
                     }
                 }
             }
             
-            console.log('❌ No LEAVE found for this date');
             return false;
             
         } catch (error) {
@@ -603,10 +480,16 @@
 
         const isCompleted = remainingTime && remainingTime.completed;
 
-        // Insert day mode toggle next to Selected Date field
+        // Insert or update day mode toggle
         const selectedDateFormGroup = document.querySelector('.modal-body .form-group');
-        if (selectedDateFormGroup && !selectedDateFormGroup.querySelector('.day-mode-capsule')) {
-            // Keep form-group as block, but wrap input and toggle together
+        if (!selectedDateFormGroup) return;
+        
+        const existingCapsule = selectedDateFormGroup.querySelector('.day-mode-capsule');
+        const modeGradient = isHalfDayMode ? '#f97316 0%, #ea580c 100%' : '#3b82f6 0%, #2563eb 100%';
+        const modeIcon = isHalfDayMode ? '🌗' : '☀️';
+        const modeText = `${isHalfDayMode ? '🌗 Half Day' : '☀️ Full Day'}${isHalfDayAutoDetected ? ' (Auto)' : ''}`;
+        
+        if (!existingCapsule) {
             const label = selectedDateFormGroup.querySelector('label');
             const inputField = selectedDateFormGroup.querySelector('input');
             
@@ -615,87 +498,30 @@
                 label.style.marginBottom = '8px';
             }
             
-            // Create wrapper for input and toggle
-            const inputWrapper = document.createElement('div');
-            inputWrapper.className = 'input-toggle-wrapper';
-            inputWrapper.style.cssText = `
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                position: relative;
-            `;
-            
             if (inputField) {
-                // Preserve original classes and add our custom class
-                const originalClasses = inputField.className;
-                inputField.className = originalClasses + ' input-with-toggle';
-                inputField.style.width = '100%';
-                inputField.style.transition = 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-                // Wrap the input
+                const inputWrapper = document.createElement('div');
+                inputWrapper.className = 'input-toggle-wrapper';
+                inputWrapper.style.cssText = 'display: flex; align-items: center; gap: 12px; position: relative;';
+                
+                inputField.className += ' input-with-toggle';
+                inputField.style.cssText = 'width: 100%; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);';
                 inputField.parentNode.insertBefore(inputWrapper, inputField);
                 inputWrapper.appendChild(inputField);
-            }
-            
-            const capsuleHTML = `
-                <div class="day-mode-capsule" data-toggle-initialized="false" style="
-                    position: relative;
-                    width: 50px;
-                    height: 32px;
-                    background: linear-gradient(135deg, ${isHalfDayMode ? '#f97316 0%, #ea580c 100%' : '#3b82f6 0%, #2563eb 100%'});
-                    border-radius: 20px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                    overflow: hidden;
-                    flex-shrink: 0;
-                ">
-                    <span class="mode-icon" style="font-size: 18px; transition: opacity 0.3s ease; z-index: 2;">${isHalfDayMode ? '🌗' : '☀️'}</span>
-                    <span class="mode-full-text" style="
-                        position: absolute;
-                        font-size: 12px;
-                        color: white;
-                        font-weight: 600;
-                        white-space: nowrap;
-                        opacity: 0;
-                        transition: opacity 0.3s ease;
-                        pointer-events: none;
-                    ">${isHalfDayMode ? '🌗 Half Day' : '☀️ Full Day'}${isHalfDayAutoDetected ? ' (Auto)' : ''}</span>
-                </div>
-            `;
-            
-            inputWrapper.insertAdjacentHTML('beforeend', capsuleHTML);
-            
-            // Add event listener to the capsule (only once)
-            const capsule = inputWrapper.querySelector('.day-mode-capsule');
-            if (capsule && capsule.getAttribute('data-toggle-initialized') === 'false') {
-                capsule.addEventListener('click', () => {
+                
+                inputWrapper.insertAdjacentHTML('beforeend', `<div class="day-mode-capsule" style="position: relative; width: 50px; height: 32px; background: linear-gradient(135deg, ${modeGradient}); border-radius: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0;"><span class="mode-icon" style="font-size: 18px; transition: opacity 0.3s ease; z-index: 2;">${modeIcon}</span><span class="mode-full-text" style="position: absolute; font-size: 12px; color: white; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;">${modeText}</span></div>`);
+                
+                inputWrapper.querySelector('.day-mode-capsule').addEventListener('click', () => {
                     isHalfDayMode = !isHalfDayMode;
                     isHalfDayAutoDetected = false;
                     updateUI(container);
                 });
-                capsule.setAttribute('data-toggle-initialized', 'true');
             }
-        } else if (selectedDateFormGroup) {
-            // Update existing capsule
-            const existingCapsule = selectedDateFormGroup.querySelector('.day-mode-capsule');
-            if (existingCapsule) {
-                existingCapsule.style.background = `linear-gradient(135deg, ${isHalfDayMode ? '#f97316 0%, #ea580c 100%' : '#3b82f6 0%, #2563eb 100%'})`;
-                const modeIcon = existingCapsule.querySelector('.mode-icon');
-                const modeText = existingCapsule.querySelector('.mode-full-text');
-                if (modeIcon) modeIcon.textContent = isHalfDayMode ? '🌗' : '☀️';
-                if (modeText) modeText.textContent = `${isHalfDayMode ? '🌗 Half Day' : '☀️ Full Day'}${isHalfDayAutoDetected ? ' (Auto)' : ''}`;
-            }
-            
-            // Ensure input field styling is maintained
-            const inputField = selectedDateFormGroup.querySelector('input');
-            if (inputField && !inputField.classList.contains('input-with-toggle')) {
-                inputField.classList.add('input-with-toggle');
-                inputField.style.width = '100%';
-                inputField.style.transition = 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-            }
+        } else {
+            existingCapsule.style.background = `linear-gradient(135deg, ${modeGradient})`;
+            const icon = existingCapsule.querySelector('.mode-icon');
+            const text = existingCapsule.querySelector('.mode-full-text');
+            if (icon) icon.textContent = modeIcon;
+            if (text) text.textContent = modeText;
         }
 
         totalDisplay.innerHTML = `
@@ -789,12 +615,14 @@
             </div>
             <div style="
                 text-align: center;
-                margin-top: 16px;
-                padding-top: 16px;
-                border-top: 1px solid #e2e8f0;
-                font-size: 11px;
+                margin-top: 20px;
+                padding: 10px 16px;
+                background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                border-radius: 8px;
+                font-size: 10px;
                 color: #94a3b8;
                 font-weight: 500;
+                letter-spacing: 0.5px;
             ">
                 Enhanced by <span style="color: #7c3aed; font-weight: 600;">UV</span> ✨
             </div>
@@ -822,50 +650,32 @@
     // Add styles for duration capsules
     const style = document.createElement('style');
     style.textContent = `
-            .dual-capsule .work-side:hover {
-                width: 120px !important;
-                z-index: 10;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
-                border-radius: 20px !important;
-            }
-            
-            .dual-capsule .break-side:hover {
-                width: 120px !important;
-                z-index: 10;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
-                border-radius: 20px !important;
-            }
-            
-            .dual-capsule .work-side:hover .work-text::before {
-                content: 'Work: ';
-            }
-            
-            .dual-capsule .break-side:hover .break-text::before {
-                content: 'Break: ';
-            }
-            
-            /* Override max-height for attendance logs container */
-            div[formarrayname="premises"].max-h-500 {
-                max-height: 100% !important;
-            }
-        `;
+        .duration-capsule { display: inline-flex; border-radius: 20px; margin-left: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .dual-capsule { position: relative; height: 28px; width: 120px; overflow: visible; }
+        .work-side, .break-side { padding: 6px 12px; font-size: 12px; color: white; font-weight: 500; transition: all 0.3s ease; white-space: nowrap; display: flex; align-items: center; justify-content: center; cursor: pointer; width: 60px; position: absolute; top: 0; height: 100%; overflow: hidden; }
+        .work-side { background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%); left: 0; border-radius: 20px 0 0 20px; }
+        .break-side { background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%); right: 0; border-radius: 0 20px 20px 0; }
+        .work-only { background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%); padding: 6px 12px; font-size: 12px; color: white; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; width: 120px; height: 28px; cursor: default; }
+        .dual-capsule .work-side:hover { width: 120px !important; z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.15); border-radius: 20px !important; }
+        .dual-capsule .break-side:hover { width: 120px !important; z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.15); border-radius: 20px !important; }
+        .dual-capsule .work-side:hover .work-text::before { content: 'Work: '; }
+        .dual-capsule .break-side:hover .break-text::before { content: 'Break: '; }
+        div[formarrayname="premises"].max-h-500 { max-height: 100% !important; }
+    `;
     document.head.appendChild(style);
 
     // Initialize observer
-    const observer = new MutationObserver(mutations => {
+    const observer = new MutationObserver(() => {
         if (isUpdating) return;
         
         const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
 
         if (container && !modalOpen) {
             modalOpen = true;
-            
-            // Initialize with default state immediately (no lag)
             isHalfDayMode = false;
             isHalfDayAutoDetected = false;
             updateUI(container);
             
-            // Detect half-day mode in background and update if needed
             setTimeout(() => {
                 const wasHalfDay = detectHalfDayMode();
                 if (wasHalfDay !== isHalfDayMode) {
@@ -873,7 +683,7 @@
                     isHalfDayMode = wasHalfDay;
                     updateUI(container);
                 }
-            }, 100); // Reduced delay
+            }, 100);
             
             startBackgroundNotifications();
         } else if (!container && modalOpen) {
@@ -884,9 +694,5 @@
         }
     });
 
-    // Start observing
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
+    observer.observe(document.body, { childList: true, subtree: true });
 })();
