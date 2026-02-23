@@ -51,6 +51,9 @@
     let isUpdating = false;
     let isHalfDayMode = false;
     let isHalfDayAutoDetected = false;
+    let debugMode = false;
+    let uvClickCount = 0;
+    let uvClickTimer = null;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
@@ -97,14 +100,50 @@
             const notification = new Notification('Keka Time Alert', {
                 body: message,
                 icon: 'https://www.google.com/s2/favicons?sz=64&domain=keka.com',
-                tag: 'keka-time-alert'
+                tag: 'keka-time-alert',
+                requireInteraction: true,
+                renotify: true,
+                silent: false
             });
             
-            // Add click handler to focus window
             notification.onclick = () => {
                 window.focus();
                 notification.close();
             };
+        }
+    }
+
+    function triggerTestNotification() {
+        setTimeout(() => {
+            showNotification('Test notification triggered! This is a 3-second delayed notification. 🔔');
+        }, 3000);
+    }
+
+    function handleUVClick() {
+        uvClickCount++;
+        
+        if (uvClickTimer) {
+            clearTimeout(uvClickTimer);
+        }
+        
+        if (uvClickCount === 3) {
+            debugMode = !debugMode;
+            console.log(`🐛 Debug Mode ${debugMode ? 'ENABLED' : 'DISABLED'}`);
+            
+            const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
+            if (container) {
+                updateUI(container);
+            }
+            
+            showNotification(`Debug Mode ${debugMode ? 'Enabled' : 'Disabled'}! 🐛`);
+            
+            uvClickCount = 0;
+            uvClickTimer = null;
+        } else {
+            uvClickTimer = setTimeout(() => {
+                uvClickCount = 0;
+                uvClickTimer = null;
+            }, 500);
         }
     }
 
@@ -583,6 +622,13 @@
                 .input-toggle-wrapper:has(.day-mode-capsule:hover) .input-with-toggle {
                     width: calc(100% - 172px) !important;
                 }
+                .test-notification-btn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15) !important;
+                }
+                .test-notification-btn:active {
+                    transform: translateY(0);
+                }
             </style>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
@@ -613,6 +659,23 @@
                     <div class="metric-value">${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min</div>
                 </div>
             </div>
+            ${debugMode ? `<div style="margin-top: 20px;">
+                <button class="test-notification-btn" style="
+                    width: 100%;
+                    padding: 12px 20px;
+                    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 10px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                " onclick="this.dispatchEvent(new CustomEvent('testNotification', {bubbles: true}))">
+                    🔔 Test Notification (3s delay)
+                </button>
+            </div>` : ''}
             <div style="
                 text-align: center;
                 margin-top: 20px;
@@ -623,12 +686,12 @@
                 color: #94a3b8;
                 font-weight: 500;
                 letter-spacing: 0.5px;
-            ">
-                Enhanced by <span style="color: #7c3aed; font-weight: 600;">UV</span> ✨
+                cursor: pointer;
+            " class="uv-signature">
+                Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV</span> ✨${debugMode ? ' <span style="color: #ef4444; font-weight: 700;">🐛 DEBUG</span>' : ''}
             </div>
         `;
 
-        // Add event listeners for copying
         totalDisplay.addEventListener('copyDuration', () => 
             copyToClipboard(formatCopyText('⏱️', 'Total Duration', results.totalDuration)));
         
@@ -643,6 +706,15 @@
             
         totalDisplay.addEventListener('copyBreakTime', () => 
             copyToClipboard(formatCopyText('☕', 'Total Break Duration', `${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min`)));
+
+        totalDisplay.addEventListener('testNotification', () => {
+            triggerTestNotification();
+        });
+
+        const uvSignature = totalDisplay.querySelector('.uv-signature');
+        if (uvSignature) {
+            uvSignature.addEventListener('click', handleUVClick);
+        }
 
         isUpdating = false;
     }, 250);
