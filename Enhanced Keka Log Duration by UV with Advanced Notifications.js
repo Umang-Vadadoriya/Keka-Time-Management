@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      10.1
+// @version      11.0
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -54,11 +54,16 @@
     let debugMode = false;
     let uvClickCount = 0;
     let uvClickTimer = null;
+    let cheatModeEnabled = false;
+    let cheatClickCount = 0;
+    let cheatClickTimer = null;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
+    const MIN_WORK_PERCENTAGE = 96.87;
+    const MIN_WORK_TIME_MINUTES = 465; // 7h 45m = 96.87% of 480min
     
     // Get target hours based on mode
     function getTargetHours() {
@@ -143,6 +148,36 @@
             uvClickTimer = setTimeout(() => {
                 uvClickCount = 0;
                 uvClickTimer = null;
+            }, 500);
+        }
+    }
+
+    function handleCheatModeClick() {
+        cheatClickCount++;
+        
+        if (cheatClickTimer) {
+            clearTimeout(cheatClickTimer);
+        }
+        
+        if (cheatClickCount === 6) {
+            cheatModeEnabled = !cheatModeEnabled;
+            if (debugMode) {
+                console.log(`🎯 Cheat Mode ${cheatModeEnabled ? 'ENABLED' : 'DISABLED'}`);
+            }
+            
+            const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
+            if (container) {
+                updateUI(container);
+            }
+            
+            showNotification(`Cheat Mode ${cheatModeEnabled ? 'Enabled' : 'Disabled'}! 🎯`);
+            
+            cheatClickCount = 0;
+            cheatClickTimer = null;
+        } else {
+            cheatClickTimer = setTimeout(() => {
+                cheatClickCount = 0;
+                cheatClickTimer = null;
             }, 500);
         }
     }
@@ -309,6 +344,120 @@
             completed: effectiveWorkMinutes >= targetMinutes,
             overtime: Math.min(0, remainingMinutes)
         };
+    }
+
+    function calculateCheatModeStats(firstStartTime, totalWorkedMinutes, breakTimeMinutes) {
+        if (!firstStartTime) {
+            return {
+                currentPercentage: 0,
+                status: 'red',
+                minTimeRemaining: MIN_WORK_TIME_MINUTES,
+                earlyLeaveTime: 'N/A',
+                isSafeToLeave: false
+            };
+        }
+
+        const shiftMinutes = EIGHT_HOURS_IN_MINUTES;
+        const currentPercentage = (totalWorkedMinutes / shiftMinutes) * 100;
+        
+        let status = 'red';
+        let statusText = '1 day LOP';
+        if (currentPercentage >= MIN_WORK_PERCENTAGE) {
+            status = 'green';
+            statusText = 'Safe';
+        } else if (currentPercentage >= 50) {
+            status = 'yellow';
+            statusText = '0.5 day LOP';
+        }
+
+        const minTimeRemaining = Math.max(0, MIN_WORK_TIME_MINUTES - totalWorkedMinutes);
+        const isSafeToLeave = currentPercentage >= MIN_WORK_PERCENTAGE;
+
+        const start = parseTime(firstStartTime);
+        let earlyLeaveTime = 'N/A';
+        if (start) {
+            const startDate = new Date();
+            startDate.setHours(start.hours, start.minutes, 0);
+            const leaveDate = new Date(startDate.getTime() + (MIN_WORK_TIME_MINUTES * 60 * 1000) + (breakTimeMinutes * 60 * 1000));
+            earlyLeaveTime = leaveDate.toLocaleTimeString('en-IN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
+        }
+
+        return {
+            currentPercentage: currentPercentage.toFixed(2),
+            status,
+            statusText,
+            minTimeRemaining,
+            earlyLeaveTime,
+            isSafeToLeave
+        };
+    }
+
+    function calculateCheatCompletionTime(firstStartTime, totalWorkedMinutes, totalBreakTime) {
+        if (!firstStartTime) return { completionTime: 'N/A', overtime: 'N/A' };
+
+        const start = parseTime(firstStartTime);
+        if (!start) return { completionTime: 'N/A', overtime: 'N/A' };
+
+        const startDate = new Date();
+        startDate.setHours(start.hours, start.minutes, 0);
+
+        const completionDate = new Date(startDate.getTime() + (MIN_WORK_TIME_MINUTES * 60 * 1000) + (totalBreakTime * 60 * 1000));
+        let completionTime = completionDate.toLocaleTimeString('en-IN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        });
+
+        if (totalWorkedMinutes >= MIN_WORK_TIME_MINUTES) {
+            completionTime += ' (Completed ✓)';
+        }
+
+        const overtimeMinutes = totalWorkedMinutes > MIN_WORK_TIME_MINUTES ? totalWorkedMinutes - MIN_WORK_TIME_MINUTES : 0;
+        const overtimeHours = Math.floor(overtimeMinutes / 60);
+        const overtimeMins = Math.floor(overtimeMinutes % 60);
+        const overtime = overtimeMinutes > 0 ? `${overtimeHours} Hr ${overtimeMins} Min` : 'No overtime';
+
+        return { completionTime, overtime };
+    }
+
+    function calculateCheatRemainingTime(startTimeStr, breakTimeMinutes) {
+        const start = parseTime(startTimeStr);
+        if (!start) return null;
+
+        const now = new Date();
+        const startDate = new Date();
+        startDate.setHours(start.hours, start.minutes, 0);
+
+        let elapsedMinutes = Math.floor((now - startDate) / (1000 * 60));
+        if (elapsedMinutes < 0) elapsedMinutes += 24 * 60;
+
+        const effectiveWorkMinutes = elapsedMinutes - breakTimeMinutes;
+        const remainingMinutes = MIN_WORK_TIME_MINUTES - effectiveWorkMinutes;
+
+        return {
+            remaining: Math.max(0, remainingMinutes),
+            completed: effectiveWorkMinutes >= MIN_WORK_TIME_MINUTES,
+            overtime: Math.min(0, remainingMinutes)
+        };
+    }
+
+    function formatCheatRemainingTime(minutes) {
+        if (minutes <= 0) return `7h 45m completed! 🎉`;
+
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+
+        if (hours === 0) {
+            return `${mins} minutes`;
+        } else if (mins === 0) {
+            return `${hours} hour${hours > 1 ? 's' : ''}`;
+        } else {
+            return `${hours} hour${hours > 1 ? 's' : ''} and ${mins} minute${mins > 1 ? 's' : ''}`;
+        }
     }
 
     function shouldNotify(remaining) {
@@ -481,15 +630,37 @@
         const results = processTimeEntries(container);
         if (!results) return;
 
-        const { completionTime, overtime } = calculateTargetCompletion(
-            results.firstStartTime,
-            results.totalHours,
-            results.breakTime
-        );
+        // Calculate cheat mode stats first
+        const totalWorkedMinutes = results.totalHours * 60;
+        const cheatStats = calculateCheatModeStats(results.firstStartTime, totalWorkedMinutes, results.breakTime);
 
-        const remainingTime = calculateRemainingTime(results.firstStartTime, results.breakTime);
-        const remainingTimeStr = remainingTime ? formatSimpleRemainingTime(remainingTime.remaining) : 'N/A';
-        const targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
+        // Use cheat mode calculations if enabled
+        let completionTime, overtime, remainingTime, remainingTimeStr, targetHoursLabel;
+        
+        if (cheatModeEnabled) {
+            // Calculate based on 7h 45m (465 minutes)
+            const cheatCompletionTime = calculateCheatCompletionTime(results.firstStartTime, totalWorkedMinutes, results.breakTime);
+            completionTime = cheatCompletionTime.completionTime;
+            overtime = cheatCompletionTime.overtime;
+            
+            remainingTime = calculateCheatRemainingTime(results.firstStartTime, results.breakTime);
+            remainingTimeStr = remainingTime ? formatCheatRemainingTime(remainingTime.remaining) : 'N/A';
+            targetHoursLabel = '7.75hr';
+        } else {
+            // Normal calculations
+            const normalCalc = calculateTargetCompletion(
+                results.firstStartTime,
+                results.totalHours,
+                results.breakTime
+            );
+            completionTime = normalCalc.completionTime;
+            overtime = normalCalc.overtime;
+            
+            remainingTime = calculateRemainingTime(results.firstStartTime, results.breakTime);
+            remainingTimeStr = remainingTime ? formatSimpleRemainingTime(remainingTime.remaining) : 'N/A';
+            targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
+        }
+        
         document.title = `${results.totalDuration}`;
 
         // Define gradient backgrounds
@@ -499,13 +670,41 @@
             green: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
             orange: 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)',
             completed: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
-            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)'
+            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)',
+            cheatGreen: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            cheatYellow: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
+            cheatRed: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
         };
 
         let totalDisplay = container.querySelector('.total-duration-display');
         if (!totalDisplay) {
             totalDisplay = document.createElement('div');
             totalDisplay.className = 'total-duration-display';
+            container.appendChild(totalDisplay);
+        }
+        
+        // Update container styling based on cheat mode
+        if (cheatModeEnabled) {
+            const bgColor = cheatStats.status === 'green' ? 'rgba(16, 185, 129, 0.08)' : 
+                           cheatStats.status === 'yellow' ? 'rgba(251, 191, 36, 0.08)' : 
+                           'rgba(239, 68, 68, 0.08)';
+            const borderColor = cheatStats.status === 'green' ? '#10b981' : 
+                               cheatStats.status === 'yellow' ? '#fbbf24' : 
+                               '#ef4444';
+            const shadowColor = cheatStats.status === 'green' ? 'rgba(16, 185, 129, 0.2)' : 
+                               cheatStats.status === 'yellow' ? 'rgba(251, 191, 36, 0.2)' : 
+                               'rgba(239, 68, 68, 0.2)';
+            
+            totalDisplay.style.cssText = `
+                margin: 20px;
+                padding: 20px;
+                background: ${bgColor};
+                border-radius: 16px;
+                box-shadow: 0 0 30px ${shadowColor}, 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+                border: 3px solid ${borderColor};
+                transition: all 0.3s ease;
+            `;
+        } else {
             totalDisplay.style.cssText = `
                 margin: 20px;
                 padding: 20px;
@@ -513,8 +712,8 @@
                 border-radius: 16px;
                 box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
                 border: 1px solid #e2e8f0;
+                transition: all 0.3s ease;
             `;
-            container.appendChild(totalDisplay);
         }
 
         const isCompleted = remainingTime && remainingTime.completed;
@@ -646,7 +845,7 @@
                     <div class="metric-label">Overtime</div>
                     <div class="metric-value">${overtime}</div>
                 </div>
-                <div class="metric-card" style="background: ${isCompleted ? gradients.completed : gradients.green}" onclick="this.dispatchEvent(new CustomEvent('copyRemaining', {bubbles: true}))">
+                <div class="metric-card remaining-time-card" style="background: ${isCompleted ? gradients.completed : gradients.green}" onclick="this.dispatchEvent(new CustomEvent('cheatModeClick', {bubbles: true}))">
                     <div class="spark-icon">${isCompleted ? '🎉' : '⌛'}</div>
                     <div class="metric-label">Remaining Time</div>
                     <div class="metric-value">${remainingTimeStr}</div>
@@ -692,6 +891,15 @@
             </div>
         `;
 
+        // Remove old event listeners by cloning the element (if it already existed)
+        const oldTotalDisplay = totalDisplay;
+        const newTotalDisplay = totalDisplay.cloneNode(false);
+        newTotalDisplay.innerHTML = totalDisplay.innerHTML;
+        if (oldTotalDisplay.parentNode) {
+            oldTotalDisplay.parentNode.replaceChild(newTotalDisplay, oldTotalDisplay);
+            totalDisplay = newTotalDisplay;
+        }
+
         totalDisplay.addEventListener('copyDuration', () => 
             copyToClipboard(formatCopyText('⏱️', 'Total Duration', results.totalDuration)));
         
@@ -709,6 +917,10 @@
 
         totalDisplay.addEventListener('testNotification', () => {
             triggerTestNotification();
+        });
+
+        totalDisplay.addEventListener('cheatModeClick', () => {
+            handleCheatModeClick();
         });
 
         const uvSignature = totalDisplay.querySelector('.uv-signature');
