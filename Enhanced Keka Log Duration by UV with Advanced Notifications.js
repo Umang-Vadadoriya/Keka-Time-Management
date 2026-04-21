@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      11.0
+// @version      12.0
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -15,29 +15,17 @@
 // @grant        GM_notification
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @run-at       document-end
-// @source       https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
-// @updateURL    https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
-// @downloadURL  https://gist.githubusercontent.com/Umang-Vadadoriya-YCS/8154cc8ed2fb3e2b73042d88a9422685/raw/Enhanced%2520Keka%2520Log%2520Duration%2520by%2520UV%2520with%2520Advanced%2520Notifications.js
-// @supportURL   https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management/issues
-// @homepage     https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
-// @compatible   firefox
-// @compatible   chrome
+// @source       https://github.com/Umang-Vadadoriya
+// @updateURL    https://gist.githubusercontent.com/Umang-Vadadoriya/ffc09708226db8bef988a0ecf1848518/raw/KekaEnhance.js
+// @downloadURL  https://gist.githubusercontent.com/Umang-Vadadoriya/ffc09708226db8bef988a0ecf1848518/raw/KekaEnhance.js
+// @supportURL   https://github.com/Umang-Vadadoriya
+// @homepage     https://github.com/Umang-Vadadoriya
 // @license      MIT
 // @noframes
-// @contributionURL https://github.com/Umang-Vadadoriya-YCS/Keka-Time-Management
-// @copyright    2024, Umang Vadadoriya (https://github.com/Umang-Vadadoriya-YCS)
+// @contributionURL https://github.com/Umang-Vadadoriya/
+// @copyright    2026, Umang Vadadoriya (https://github.com/Umang-Vadadoriya)
 // ==/UserScript==
 
-
-// #TODO - Introduce Half Day Mode
-// #TODO - On Click of notification it should take us to the Website (TEST)
-// #TODO - Add a feature to Show Total Break Duration in UI (DONE)
-// #TODO - Add a feature to Copy the Total Duration to Clipboard (DONE)
-// #TODO - Add a feature to Copy the 8hr Completion Time to Clipboard (DONE)
-// #TODO - Add a feature to Copy the Overtime to Clipboard (DONE)
-// #TODO - Add a feature to Copy the Remaining Time to Clipboard (DONE)
-// #TODO - Add Work Hours Individual Logs Same as Break Time Logs (DONE)
-// #TODO - Add Day Mode Full/Half Auto Detection and Manual Selection (DONE)
 
 (function () {
     'use strict';
@@ -57,6 +45,8 @@
     let cheatModeEnabled = false;
     let cheatClickCount = 0;
     let cheatClickTimer = null;
+    let isManualMode = false;
+    let manualEntries = [];
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
@@ -221,10 +211,442 @@
         return `${hours} Hr ${minutes} Min`;
     }
 
+    function processManualEntries(renderOnUI = true) {
+        if (manualEntries.length === 0) {
+            return { isEmpty: true, totalDuration: 'N/A', firstStartTime: null, totalHours: 0, breakTime: 0 };
+        }
+
+        let totalMinutes = 0;
+        let firstStartTime = manualEntries[0].start;
+        let breakTime = 0;
+
+        manualEntries.forEach((entry, index) => {
+            const duration = calculateDuration(entry.start, entry.end);
+            totalMinutes += duration.hours * 60 + duration.minutes;
+
+            // Calculate break time between entries
+            if (index > 0) {
+                const prevEndTime = manualEntries[index - 1].end;
+                const currentStartTime = entry.start;
+                const breakDuration = calculateDuration(prevEndTime, currentStartTime);
+                breakTime += breakDuration.hours * 60 + breakDuration.minutes;
+            }
+        });
+
+        const totalHours = Math.floor(totalMinutes / 60);
+        const totalMins = totalMinutes % 60;
+
+        return {
+            totalDuration: formatDuration(totalHours, totalMins),
+            firstStartTime,
+            totalHours: totalHours + totalMins / 60,
+            breakTime,
+            isManual: true
+        };
+    }
+
+    function validateTimeFormat(timeStr) {
+        // Validates time format: HH:MM AM/PM
+        const timeRegex = /^(0?[1-9]|1[0-2]):([0-5][0-9])\s?(AM|PM|am|pm)$/i;
+        return timeRegex.test(timeStr.trim());
+    }
+
+    function normalizeTimeFormat(timeStr) {
+        // Normalize time format to match existing format
+        const trimmed = timeStr.trim();
+        const match = trimmed.match(/^(0?[1-9]|1[0-2]):([0-5][0-9])\s?(AM|PM|am|pm)$/i);
+        if (!match) return null;
+        
+        const [, hours, minutes, period] = match;
+        const paddedHours = hours.padStart(2, '0');
+        return `${paddedHours}:${minutes} ${period.toUpperCase()}`;
+    }
+
+    function isStartBeforeEnd(startTime, endTime) {
+        const start = parseTime(startTime);
+        const end = parseTime(endTime);
+        
+        if (!start || !end) return false;
+        
+        const startMinutes = start.hours * 60 + start.minutes;
+        const endMinutes = end.hours * 60 + end.minutes;
+        
+        return startMinutes < endMinutes;
+    }
+
+    function validateManualEntry(startTime, endTime) {
+        const errors = [];
+        
+        if (!startTime || startTime.trim() === '') {
+            errors.push('Start time is required');
+        } else if (!validateTimeFormat(startTime)) {
+            errors.push('Invalid start time format. Use HH:MM AM/PM (e.g., 9:00 AM)');
+        }
+        
+        if (!endTime || endTime.trim() === '') {
+            errors.push('End time is required');
+        } else if (!validateTimeFormat(endTime)) {
+            errors.push('Invalid end time format. Use HH:MM AM/PM (e.g., 5:00 PM)');
+        }
+        
+        if (errors.length === 0 && !isStartBeforeEnd(startTime, endTime)) {
+            errors.push('End time must be after start time');
+        }
+        
+        return {
+            isValid: errors.length === 0,
+            errors
+        };
+    }
+
+    function renderManualEntryUI(container) {
+        const gradients = {
+            purple: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
+            blue: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
+            green: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
+            orange: 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)',
+            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)',
+            red: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+        };
+
+        // Calculate preview if entries exist
+        let previewHTML = '';
+        if (manualEntries.length > 0) {
+            const preview = processManualEntries(false);
+            previewHTML = `
+                <div style="
+                    padding: 16px;
+                    background: ${gradients.green};
+                    border-radius: 12px;
+                    color: white;
+                    margin-bottom: 16px;
+                ">
+                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 6px; font-weight: 500;">Preview Total</div>
+                    <div style="font-size: 24px; font-weight: 600;">${preview.totalDuration}</div>
+                </div>
+            `;
+        }
+
+        // Render entry list
+        let entriesListHTML = '';
+        if (manualEntries.length > 0) {
+            entriesListHTML = '<div style="margin-bottom: 16px;">';
+            manualEntries.forEach((entry, index) => {
+                const duration = calculateDuration(entry.start, entry.end);
+                entriesListHTML += `
+                    <div style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 12px 16px;
+                        background: white;
+                        border: 2px solid #e2e8f0;
+                        border-radius: 10px;
+                        margin-bottom: 8px;
+                    ">
+                        <div style="flex: 1;">
+                            <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${entry.start} - ${entry.end}</div>
+                            <div style="font-size: 12px; color: #64748b;">Duration: ${duration.hours}h ${duration.minutes}m</div>
+                        </div>
+                        <button class="remove-entry-btn" data-index="${index}" style="
+                            background: ${gradients.red};
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            padding: 8px 12px;
+                            font-size: 12px;
+                            font-weight: 600;
+                            cursor: pointer;
+                            transition: transform 0.2s;
+                        ">Remove</button>
+                    </div>
+                `;
+            });
+            entriesListHTML += '</div>';
+        }
+
+        const manualUI = `
+            <div class="manual-entry-container" style="
+                margin: 20px;
+                padding: 20px;
+                background: #ffffff;
+                border-radius: 16px;
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                border: 1px solid #e2e8f0;
+            ">
+                <div style="
+                    text-align: center;
+                    margin-bottom: 20px;
+                    padding-bottom: 16px;
+                    border-bottom: 2px solid #f1f5f9;
+                ">
+                    <div style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 4px;">📝 Manual Log Entry</div>
+                    <div style="font-size: 13px; color: #64748b;">Add your time entries manually</div>
+                </div>
+
+                ${previewHTML}
+                ${entriesListHTML}
+
+                <div id="manual-error-message" style="
+                    display: none;
+                    padding: 12px;
+                    background: linear-gradient(135deg, #fecaca 0%, #fca5a5 100%);
+                    border-radius: 8px;
+                    color: #7f1d1d;
+                    font-size: 13px;
+                    font-weight: 500;
+                    margin-bottom: 16px;
+                "></div>
+
+                <div style="
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 12px;
+                    margin-bottom: 16px;
+                ">
+                    <div>
+                        <label style="
+                            display: block;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: #475569;
+                            margin-bottom: 6px;
+                        ">Start Time</label>
+                        <input
+                            type="text"
+                            id="manual-start-time"
+                            placeholder="9:00 AM"
+                            style="
+                                width: 100%;
+                                padding: 10px 12px;
+                                border: 2px solid #e2e8f0;
+                                border-radius: 8px;
+                                font-size: 14px;
+                                transition: border-color 0.2s;
+                                box-sizing: border-box;
+                            "
+                        />
+                    </div>
+                    <div>
+                        <label style="
+                            display: block;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: #475569;
+                            margin-bottom: 6px;
+                        ">End Time</label>
+                        <input
+                            type="text"
+                            id="manual-end-time"
+                            placeholder="5:00 PM"
+                            style="
+                                width: 100%;
+                                padding: 10px 12px;
+                                border: 2px solid #e2e8f0;
+                                border-radius: 8px;
+                                font-size: 14px;
+                                transition: border-color 0.2s;
+                                box-sizing: border-box;
+                            "
+                        />
+                    </div>
+                </div>
+
+                <button id="add-manual-entry-btn" style="
+                    width: 100%;
+                    padding: 12px 20px;
+                    background: ${gradients.purple};
+                    color: white;
+                    border: none;
+                    border-radius: 10px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    margin-bottom: 12px;
+                ">➕ Add Entry</button>
+
+                ${manualEntries.length > 0 ? `
+                    <button id="calculate-manual-btn" style="
+                        width: 100%;
+                        padding: 12px 20px;
+                        background: ${gradients.green};
+                        color: white;
+                        border: none;
+                        border-radius: 10px;
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                        margin-bottom: 12px;
+                    ">✓ Calculate & Show Metrics</button>
+                ` : ''}
+
+                <button id="exit-manual-mode-btn" style="
+                    width: 100%;
+                    padding: 10px 20px;
+                    background: transparent;
+                    color: #64748b;
+                    border: 2px solid #e2e8f0;
+                    border-radius: 10px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                ">${manualEntries.length > 0 ? '← Back to Results' : '← Cancel'}</button>
+
+                <div style="
+                    text-align: center;
+                    margin-top: 20px;
+                    padding: 10px 16px;
+                    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                    border-radius: 8px;
+                    font-size: 10px;
+                    color: #94a3b8;
+                    font-weight: 500;
+                    letter-spacing: 0.5px;
+                ">
+                    Enhanced by <span style="color: #7c3aed; font-weight: 600;">UV</span> ✨
+                </div>
+            </div>
+        `;
+
+        return manualUI;
+    }
+
+    function attachManualEntryHandlers(container) {
+        const addBtn = document.getElementById('add-manual-entry-btn');
+        const calculateBtn = document.getElementById('calculate-manual-btn');
+        const exitBtn = document.getElementById('exit-manual-mode-btn');
+        const startInput = document.getElementById('manual-start-time');
+        const endInput = document.getElementById('manual-end-time');
+        const errorMsg = document.getElementById('manual-error-message');
+
+        function showError(message) {
+            errorMsg.textContent = message;
+            errorMsg.style.display = 'block';
+            setTimeout(() => {
+                errorMsg.style.display = 'none';
+            }, 5000);
+        }
+
+        function clearError() {
+            errorMsg.style.display = 'none';
+        }
+
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                clearError();
+                const startTime = startInput.value.trim();
+                const endTime = endInput.value.trim();
+
+                const validation = validateManualEntry(startTime, endTime);
+                if (!validation.isValid) {
+                    showError(validation.errors.join('. '));
+                    return;
+                }
+
+                const normalizedStart = normalizeTimeFormat(startTime);
+                const normalizedEnd = normalizeTimeFormat(endTime);
+
+                manualEntries.push({
+                    start: normalizedStart,
+                    end: normalizedEnd
+                });
+
+                startInput.value = '';
+                endInput.value = '';
+                updateUI(container);
+            });
+        }
+
+        if (calculateBtn) {
+            calculateBtn.addEventListener('click', () => {
+                if (manualEntries.length > 0) {
+                    isManualMode = true;
+                    updateUI(container);
+                }
+            });
+        }
+
+        if (exitBtn) {
+            exitBtn.addEventListener('click', () => {
+                isManualMode = false;
+                if (manualEntries.length === 0) {
+                    manualEntries = [];
+                }
+                updateUI(container);
+            });
+        }
+
+        // Handle remove entry buttons
+        document.querySelectorAll('.remove-entry-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.getAttribute('data-index'));
+                manualEntries.splice(index, 1);
+                updateUI(container);
+            });
+        });
+
+        // Add hover effects
+        if (addBtn) {
+            addBtn.addEventListener('mouseenter', () => {
+                addBtn.style.transform = 'translateY(-2px)';
+                addBtn.style.boxShadow = '0 6px 12px rgba(0, 0, 0, 0.15)';
+            });
+            addBtn.addEventListener('mouseleave', () => {
+                addBtn.style.transform = 'translateY(0)';
+                addBtn.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+            });
+        }
+
+        if (calculateBtn) {
+            calculateBtn.addEventListener('mouseenter', () => {
+                calculateBtn.style.transform = 'translateY(-2px)';
+                calculateBtn.style.boxShadow = '0 6px 12px rgba(0, 0, 0, 0.15)';
+            });
+            calculateBtn.addEventListener('mouseleave', () => {
+                calculateBtn.style.transform = 'translateY(0)';
+                calculateBtn.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+            });
+        }
+
+        if (exitBtn) {
+            exitBtn.addEventListener('mouseenter', () => {
+                exitBtn.style.borderColor = '#cbd5e1';
+                exitBtn.style.color = '#475569';
+            });
+            exitBtn.addEventListener('mouseleave', () => {
+                exitBtn.style.borderColor = '#e2e8f0';
+                exitBtn.style.color = '#64748b';
+            });
+        }
+    }
+
     function processTimeEntries(container, renderOnUI = true) {
         if (!container) return null;
 
         const timeRows = container.querySelectorAll('.ng-untouched.ng-pristine.ng-valid');
+        
+        // Check if in manual mode and use manual entries
+        if (isManualMode && manualEntries.length > 0) {
+            return processManualEntries(renderOnUI);
+        }
+        
+        // Filter to only actual time entry rows (must contain time elements)
+        const validTimeRows = Array.from(timeRows).filter(row => {
+            const hasStartTime = row.querySelector('.d-flex.align-items-center .w-120.mr-20 .text-small');
+            const hasEndTime = row.querySelector('.d-flex.align-items-center .w-120:not(.mr-20) .text-small');
+            return hasStartTime || hasEndTime;
+        });
+        
+        // Detect empty logs state
+        if (validTimeRows.length === 0) {
+            return { isEmpty: true, totalDuration: 'N/A', firstStartTime: null, totalHours: 0, breakTime: 0 };
+        }
+        
         let totalMinutes = 0;
         let firstStartTime = null;
         let breakTime = 0;
@@ -232,7 +654,7 @@
         let endTime = null;
         let brekduration = null;
 
-        timeRows.forEach((row, index) => {
+        validTimeRows.forEach((row, index) => {
             const startTimeElement = row.querySelector('.d-flex.align-items-center .w-120.mr-20 .text-small');
             const endTimeElement = row.querySelector('.d-flex.align-items-center .w-120:not(.mr-20) .text-small');
 
@@ -628,7 +1050,99 @@
         }
 
         const results = processTimeEntries(container);
-        if (!results) return;
+        if (!results) {
+            isUpdating = false;
+            return;
+        }
+
+        // If logs are empty and NOT in manual mode, show empty state
+        if (results.isEmpty && !isManualMode) {
+            let totalDisplay = container.querySelector('.total-duration-display');
+            if (!totalDisplay) {
+                totalDisplay = document.createElement('div');
+                totalDisplay.className = 'total-duration-display';
+                container.appendChild(totalDisplay);
+            }
+            totalDisplay.innerHTML = `
+                <style>
+                    .manual-icon-btn {
+                        position: absolute;
+                        top: 2px;
+                        right: 2px;
+                        width: 25px;
+                        height: 25px;
+                        background: rgba(124, 58, 237, 0.1);
+                        border: 1px solid rgba(124, 58, 237, 0.2);
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        opacity: 0.6;
+                        z-index: 10;
+                    }
+                    .manual-icon-btn:hover {
+                        opacity: 1;
+                        background: rgba(124, 58, 237, 0.15);
+                        transform: scale(1.05);
+                        box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+                    }
+                    .manual-icon-btn svg {
+                        width: 14px;
+                        height: 14px;
+                        stroke: #7c3aed;
+                        fill: none;
+                        stroke-width: 2;
+                        stroke-linecap: round;
+                        stroke-linejoin: round;
+                    }
+                </style>
+                <div style="
+                    margin: 20px;
+                    padding: 40px 20px;
+                    background: #ffffff;
+                    border-radius: 16px;
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                    border: 1px solid #e2e8f0;
+                    text-align: center;
+                    position: relative;
+                ">
+                    <button class="manual-icon-btn manual-entry-toggle-btn" title="Manual Entry Mode" onclick="this.dispatchEvent(new CustomEvent('toggleManualMode', {bubbles: true}))">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                    </button>
+                    <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;">📋</div>
+                    <div style="font-size: 18px; font-weight: 600; color: #475569; margin-bottom: 8px;">No Time Entries</div>
+                    <div style="font-size: 14px; color: #94a3b8;">Click the pen icon to add manual entries</div>
+                </div>
+            `;
+            const manualBtn = totalDisplay.querySelector('.manual-entry-toggle-btn');
+            if (manualBtn) {
+                manualBtn.addEventListener('click', () => {
+                    isManualMode = true;
+                    updateUI(container);
+                });
+            }
+            isUpdating = false;
+            return;
+        }
+        
+        // If in manual mode, show manual entry UI
+        if (isManualMode && manualEntries.length === 0) {
+            let totalDisplay = container.querySelector('.total-duration-display');
+            if (!totalDisplay) {
+                totalDisplay = document.createElement('div');
+                totalDisplay.className = 'total-duration-display';
+                container.appendChild(totalDisplay);
+            }
+            totalDisplay.innerHTML = renderManualEntryUI(container);
+            attachManualEntryHandlers(container);
+            isUpdating = false;
+            return;
+        }
 
         // Calculate cheat mode stats first
         const totalWorkedMinutes = results.totalHours * 60;
@@ -703,6 +1217,7 @@
                 box-shadow: 0 0 30px ${shadowColor}, 0 10px 15px -3px rgba(0, 0, 0, 0.1);
                 border: 3px solid ${borderColor};
                 transition: all 0.3s ease;
+                position: relative;
             `;
         } else {
             totalDisplay.style.cssText = `
@@ -713,6 +1228,7 @@
                 box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
                 border: 1px solid #e2e8f0;
                 transition: all 0.3s ease;
+                position: relative;
             `;
         }
 
@@ -828,7 +1344,45 @@
                 .test-notification-btn:active {
                     transform: translateY(0);
                 }
+                .manual-icon-btn {
+                    position: absolute;
+                    top: 2px;
+                    right: 2px;
+                    width: 23px;
+                    height: 23px;
+                    background: rgba(124, 58, 237, 0.1);
+                    border: 1px solid rgba(124, 58, 237, 0.2);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    opacity: 0.6;
+                    z-index: 10;
+                }
+                .manual-icon-btn:hover {
+                    opacity: 1;
+                    background: rgba(124, 58, 237, 0.15);
+                    transform: scale(1.05);
+                    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+                }
+                .manual-icon-btn svg {
+                    width: 14px;
+                    height: 14px;
+                    stroke: #7c3aed;
+                    fill: none;
+                    stroke-width: 2;
+                    stroke-linecap: round;
+                    stroke-linejoin: round;
+                }
             </style>
+            <button class="manual-icon-btn manual-entry-toggle-btn" title="Manual Entry Mode" onclick="this.dispatchEvent(new CustomEvent('toggleManualMode', {bubbles: true}))">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                </svg>
+            </button>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
                     <div class="spark-icon">⏱️</div>
@@ -923,10 +1477,18 @@
             handleCheatModeClick();
         });
 
+        totalDisplay.addEventListener('toggleManualMode', () => {
+            isManualMode = true;
+            manualEntries = [];
+            updateUI(container);
+        });
+
         const uvSignature = totalDisplay.querySelector('.uv-signature');
         if (uvSignature) {
             uvSignature.addEventListener('click', handleUVClick);
         }
+
+        // Manual entry button hover is handled by CSS
 
         isUpdating = false;
     }, 250);
@@ -952,7 +1514,16 @@
     const observer = new MutationObserver(() => {
         if (isUpdating) return;
         
-        const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
+        // Check for both possible containers: logs (with entries) or premises (without entries)
+        let container = document.querySelector('.modal-body form div[formarrayname="logs"]');
+        
+        // If logs container doesn't exist, check for premises container (no entries case)
+        if (!container) {
+            const premisesContainer = document.querySelector('.modal-body form div[formarrayname="premises"]');
+            if (premisesContainer) {
+                container = premisesContainer;
+            }
+        }
 
         if (container && !modalOpen) {
             modalOpen = true;
@@ -974,6 +1545,8 @@
             modalOpen = false;
             isHalfDayMode = false;
             isHalfDayAutoDetected = false;
+            isManualMode = false;
+            manualEntries = [];
             stopBackgroundNotifications();
         }
     });
