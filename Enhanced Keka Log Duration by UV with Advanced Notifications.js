@@ -497,6 +497,48 @@
                     transition: all 0.2s ease;
                 ">${manualEntries.length > 0 ? '← Back to Results' : '← Cancel'}</button>
 
+                <style>
+                    .uv-signature {
+                        position: relative;
+                        overflow: visible;
+                    }
+                    .uv-text {
+                        position: relative;
+                        display: inline-block;
+                        transition: all 0.3s ease;
+                    }
+                    .uv-full-name {
+                        position: absolute;
+                        bottom: calc(100% + 8px);
+                        left: 50%;
+                        transform: translateX(-50%) translateY(10px);
+                        background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+                        color: white;
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        font-size: 12px;
+                        font-weight: 600;
+                        white-space: nowrap;
+                        opacity: 0;
+                        pointer-events: none;
+                        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                        box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+                        z-index: 1000;
+                    }
+                    .uv-full-name::after {
+                        content: '';
+                        position: absolute;
+                        top: 100%;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        border: 6px solid transparent;
+                        border-top-color: #6366f1;
+                    }
+                    .uv-text:hover .uv-full-name {
+                        opacity: 1;
+                        transform: translateX(-50%) translateY(0);
+                    }
+                </style>
                 <div style="
                     text-align: center;
                     margin-top: 20px;
@@ -507,8 +549,8 @@
                     color: #94a3b8;
                     font-weight: 500;
                     letter-spacing: 0.5px;
-                ">
-                    Enhanced by <span style="color: #7c3aed; font-weight: 600;">UV</span> ✨
+                " class="uv-signature">
+                    Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨
                 </div>
             </div>
         `;
@@ -1344,6 +1386,46 @@
                 .test-notification-btn:active {
                     transform: translateY(0);
                 }
+                .uv-signature {
+                    position: relative;
+                    overflow: visible;
+                }
+                .uv-text {
+                    position: relative;
+                    display: inline-block;
+                    transition: all 0.3s ease;
+                }
+                .uv-full-name {
+                    position: absolute;
+                    bottom: calc(100% + 8px);
+                    left: 50%;
+                    transform: translateX(-50%) translateY(10px);
+                    background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+                    color: white;
+                    padding: 8px 16px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    white-space: nowrap;
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+                    z-index: 1000;
+                }
+                .uv-full-name::after {
+                    content: '';
+                    position: absolute;
+                    top: 100%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    border: 6px solid transparent;
+                    border-top-color: #6366f1;
+                }
+                .uv-text:hover .uv-full-name {
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(0);
+                }
                 .manual-icon-btn {
                     position: absolute;
                     top: 2px;
@@ -1441,7 +1523,7 @@
                 letter-spacing: 0.5px;
                 cursor: pointer;
             " class="uv-signature">
-                Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV</span> ✨${debugMode ? ' <span style="color: #ef4444; font-weight: 700;">🐛 DEBUG</span>' : ''}
+                Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨${debugMode ? ' <span style="color: #ef4444; font-weight: 700;">🐛 DEBUG</span>' : ''}
             </div>
         `;
 
