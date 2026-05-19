@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      19.1
+// @version      19.2
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -813,20 +813,42 @@
         return { pairs, openStart };
     }
 
-    function calculateTargetCompletion(firstStartTime, totalWorkedHours, totalBreakTime) {
+    function calculateTargetCompletion(firstStartTime, totalWorkedHours, totalBreakTime, opts) {
+        // opts: { firstStartDate?: Date, breakMs?: number } — when provided, both
+        // inputs are second-precise (from Keka's API) and the displayed completion
+        // time shows seconds too. Without opts we only have DOM HH:MM data, so we
+        // fall back to minute precision and round UP so leaving at the shown time
+        // still guarantees the target is met.
         if (!firstStartTime) return { completionTime: 'N/A', overtime: 'N/A' };
 
-        const start = parseTime(firstStartTime);
-        if (!start) return { completionTime: 'N/A', overtime: 'N/A' };
+        const hasPreciseInputs = !!(opts && (opts.firstStartDate instanceof Date || Number.isFinite(opts.breakMs)));
 
-        const startDate = new Date();
-        startDate.setHours(start.hours, start.minutes, 0);
+        let startDate;
+        if (opts && opts.firstStartDate instanceof Date) {
+            startDate = opts.firstStartDate;
+        } else {
+            const start = parseTime(firstStartTime);
+            if (!start) return { completionTime: 'N/A', overtime: 'N/A' };
+            startDate = new Date();
+            startDate.setHours(start.hours, start.minutes, 0);
+        }
 
         const targetMinutes = getTargetHours();
         const totalWorkedMinutes = totalWorkedHours * 60;
 
-        const completionDate = new Date(startDate.getTime() + (targetMinutes * 60 * 1000) + (totalBreakTime * 60 * 1000));
-        let completionTime = completionDate.toLocaleTimeString('en-IN', {
+        const breakMs = (opts && Number.isFinite(opts.breakMs))
+            ? opts.breakMs
+            : (totalBreakTime * 60 * 1000);
+        const rawCompletionMs = startDate.getTime() + (targetMinutes * 60 * 1000) + breakMs;
+        const completionDate = hasPreciseInputs
+            ? new Date(rawCompletionMs)
+            : new Date(Math.ceil(rawCompletionMs / 60000) * 60000); // ceil only when we lack seconds
+        let completionTime = completionDate.toLocaleTimeString('en-IN', hasPreciseInputs ? {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        } : {
             hour: '2-digit',
             minute: '2-digit',
             hour12: true
@@ -1091,20 +1113,22 @@
 
         // Override DOM-derived totals with API-precise values when available.
         // DOM only exposes HH:MM (no seconds), so cumulative truncation can
-        // shift work/break by ~1 min. Skipped when:
-        //   - manual mode (user is editing locally),
-        //   - the day is still in progress (API only counts closed pairs;
-        //     DOM math correctly extends the open punch to "now").
+        // shift work/break by ~1 min and (more critically) make the displayed
+        // "out time" earlier than the real 8h-completion second.
+        //
+        // Layered override:
+        //   1) When the day has an open punch, the API doesn't count the live
+        //      working interval — DOM math correctly extends it to "now". So
+        //      we keep results.totalHours/breakTime/totalDuration as-is.
+        //   2) Regardless of open-punch state, we always attach second-precise
+        //      `firstStartDate` + `breakMs` (from validInOutPairs) so that the
+        //      completion-time calc can show seconds and be exact.
+        //   3) Manual mode keeps DOM math entirely (user is editing locally).
         const hasOpenPunch =
             (dayApiData && dayApiData.isInMissing) ||
             Array.from(container.querySelectorAll('.d-flex.align-items-center .w-120:not(.mr-20) .text-small'))
                 .some(el => (el.textContent || '').trim() === 'MISSING');
-        if (dayApiData && !isManualMode && !results.isEmpty && !hasOpenPunch) {
-            const totalEffMins = Math.round((dayApiData.totalEffectiveHours || 0) * 60);
-            const breakMins = Math.round((dayApiData.totalBreakDuration || 0) * 60);
-            results.totalHours = totalEffMins / 60;
-            results.breakTime = breakMins;
-            results.totalDuration = formatDuration(Math.floor(totalEffMins / 60), totalEffMins % 60);
+        if (dayApiData && !isManualMode && !results.isEmpty) {
             const firstLog = dayApiData.firstLogOfTheDay || dayApiData.validInOutPairs?.[0]?.inTime;
             if (firstLog) {
                 const t = new Date(firstLog);
@@ -1112,6 +1136,28 @@
                 const mm = t.getMinutes().toString().padStart(2, '0');
                 const ap = t.getHours() < 12 ? 'AM' : 'PM';
                 results.firstStartTime = `${hh}:${mm} ${ap}`;
+                results.firstStartDate = t;
+            }
+            // Exact break milliseconds across completed pairs (closed gaps only —
+            // for an "in-progress" day this is the same set Keka uses).
+            const pairs = dayApiData.validInOutPairs || [];
+            if (pairs.length > 1) {
+                let breakMs = 0;
+                for (let i = 1; i < pairs.length; i++) {
+                    breakMs += new Date(pairs[i].inTime) - new Date(pairs[i - 1].outTime);
+                }
+                results.breakMs = breakMs;
+            } else if (pairs.length === 1) {
+                results.breakMs = 0;
+            }
+            // Closed-day work totals come from the API; keep DOM totals when the
+            // day's still in progress.
+            if (!hasOpenPunch) {
+                const totalEffMins = Math.round((dayApiData.totalEffectiveHours || 0) * 60);
+                const breakMins = Math.round((dayApiData.totalBreakDuration || 0) * 60);
+                results.totalHours = totalEffMins / 60;
+                results.breakTime = breakMins;
+                results.totalDuration = formatDuration(Math.floor(totalEffMins / 60), totalEffMins % 60);
             }
         }
 
@@ -1211,7 +1257,8 @@
         const normalCalc = calculateTargetCompletion(
             results.firstStartTime,
             results.totalHours,
-            results.breakTime
+            results.breakTime,
+            { firstStartDate: results.firstStartDate, breakMs: results.breakMs }
         );
         const completionTime = normalCalc.completionTime;
         const overtime = normalCalc.overtime;
