@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      16.1
+// @version      18.0
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -45,7 +45,8 @@
     let isManualMode = false;
     let manualEntries = [];
     let showManualForm = false;
-    let prefillOpenStart = null;
+    let prefillInputs = null; // {start, end} — applied to the manual form on next render
+    let dayApiData = null;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
@@ -315,17 +316,21 @@
                             <div style="font-size: 14px; font-weight: 600; color: inherit;">${entry.start} - ${entry.end}</div>
                             <div style="font-size: 12px; color: inherit; opacity: 0.65;">Duration: ${duration.hours}h ${duration.minutes}m</div>
                         </div>
-                        <button class="remove-entry-btn" data-index="${index}" style="
-                            background: ${gradients.red};
-                            color: white;
-                            border: none;
-                            border-radius: 8px;
-                            padding: 8px 12px;
-                            font-size: 12px;
-                            font-weight: 600;
-                            cursor: pointer;
-                            transition: transform 0.2s;
-                        ">Remove</button>
+                        <div style="display: flex; gap: 6px;">
+                            <button class="edit-entry-btn entry-icon-btn" data-index="${index}" title="Edit" aria-label="Edit">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
+                            </button>
+                            <button class="remove-entry-btn entry-icon-btn entry-icon-btn--danger" data-index="${index}" title="Remove" aria-label="Remove">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 6h18"></path>
+                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 `;
             });
@@ -472,6 +477,33 @@
                 ">${manualEntries.length > 0 ? '← Back to Results' : '← Cancel'}</button>
 
                 <style>
+                    .entry-icon-btn {
+                        width: 28px;
+                        height: 28px;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        background: transparent;
+                        color: inherit;
+                        opacity: 0.65;
+                        border: 1px solid rgba(148, 163, 184, 0.35);
+                        border-radius: 6px;
+                        cursor: pointer;
+                        transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+                        padding: 0;
+                    }
+                    .entry-icon-btn:hover {
+                        opacity: 1;
+                        border-color: rgba(148, 163, 184, 0.6);
+                    }
+                    .entry-icon-btn:active {
+                        transform: scale(0.94);
+                    }
+                    .entry-icon-btn--danger:hover {
+                        color: #ef4444;
+                        border-color: rgba(239, 68, 68, 0.6);
+                        opacity: 1;
+                    }
                     .uv-signature {
                         position: relative;
                         overflow: visible;
@@ -540,9 +572,10 @@
         const endInput = document.getElementById('manual-end-time');
         const errorMsg = document.getElementById('manual-error-message');
 
-        if (prefillOpenStart && startInput) {
-            startInput.value = prefillOpenStart;
-            prefillOpenStart = null;
+        if (prefillInputs) {
+            if (startInput) startInput.value = prefillInputs.start || '';
+            if (endInput) endInput.value = prefillInputs.end || '';
+            prefillInputs = null;
         }
 
         function showError(message) {
@@ -598,7 +631,7 @@
                 isManualMode = false;
                 showManualForm = false;
                 manualEntries = [];
-                prefillOpenStart = null;
+                prefillInputs = null;
                 updateUI(container);
             });
         }
@@ -606,7 +639,19 @@
         // Handle remove entry buttons
         document.querySelectorAll('.remove-entry-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const index = parseInt(e.target.getAttribute('data-index'));
+                const index = parseInt(e.currentTarget.getAttribute('data-index'));
+                manualEntries.splice(index, 1);
+                updateUI(container);
+            });
+        });
+
+        // Handle edit entry buttons: pop the entry into the inputs for adjustment.
+        document.querySelectorAll('.edit-entry-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.currentTarget.getAttribute('data-index'));
+                const entry = manualEntries[index];
+                if (!entry) return;
+                prefillInputs = { start: entry.start, end: entry.end };
                 manualEntries.splice(index, 1);
                 updateUI(container);
             });
@@ -883,27 +928,69 @@
         return `${emoji}\n${label}:\n${value}`;
     }
 
+    function getSelectedDateInfo() {
+        const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+        let txt = '';
+        const dateTextEl = document.querySelector('.modal-body kk-text-styles[label="Selected date"]');
+        if (dateTextEl) {
+            txt = (dateTextEl.innerText || dateTextEl.textContent || '').trim();
+        }
+        if (!txt) {
+            const input =
+                document.querySelector('input[formcontrolname="selectedDate"]') ||
+                document.querySelector('input[name="selectedDate"]') ||
+                document.querySelector('.modal-body input[type="text"]');
+            if (input) txt = input.value || '';
+        }
+        if (!txt) return null;
+        const m = txt.match(/(\d{1,2})\s+(\w+)\s+(\d{4})/);
+        if (!m) return null;
+        const mIdx = MONTHS[m[2].slice(0, 3)];
+        if (mIdx === undefined) return null;
+        const yyyy = m[3];
+        const mm = String(mIdx + 1).padStart(2, '0');
+        const dd = String(m[1]).padStart(2, '0');
+        return {
+            day: m[1], monthName: m[2], year: yyyy,
+            monthKey: `${yyyy}-${mm}-01`,
+            dateKey: `${yyyy}-${mm}-${dd}`,
+        };
+    }
+
+    async function fetchMonthAttendance(monthKey) {
+        const token = localStorage.getItem('access_token');
+        if (!token) return null;
+        const url = `${location.origin}/k/attendance/api/mytime/attendance/summary/${monthKey}`;
+        try {
+            const res = await fetch(url, {
+                credentials: 'include',
+                headers: {
+                    Accept: 'application/json, text/plain, */*',
+                    Authorization: `Bearer ${token}`,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+            if (!res.ok) return null;
+            const json = await res.json();
+            if (!json.succeeded) return null;
+            return Array.isArray(json.data) ? json.data : (json.data?.dailyAttendances || []);
+        } catch {
+            return null;
+        }
+    }
+
+    async function loadDayAttendance() {
+        const info = getSelectedDateInfo();
+        if (!info) return null;
+        const days = await fetchMonthAttendance(info.monthKey);
+        if (!days) return null;
+        return days.find(d => (d.attendanceDate || '').startsWith(info.dateKey)) || null;
+    }
+
     function detectHalfDayMode() {
         try {
-            
-            // Get the selected date. New Keka modal exposes it as text inside
-            // <kk-text-styles label="Selected date">; legacy modal used <input formcontrolname="selectedDate">.
-            let selectedDateValue = '';
-            const dateTextEl = document.querySelector('.modal-body kk-text-styles[label="Selected date"]');
-            if (dateTextEl) {
-                selectedDateValue = (dateTextEl.innerText || dateTextEl.textContent || '').trim();
-            }
-            if (!selectedDateValue) {
-                const selectedDateInput =
-                    document.querySelector('input[formcontrolname="selectedDate"]') ||
-                    document.querySelector('input[name="selectedDate"]') ||
-                    document.querySelector('.modal-body input[type="text"]');
-                if (selectedDateInput) {
-                    selectedDateValue = selectedDateInput.value || '';
-                }
-            }
-
-            if (!selectedDateValue) {
+            const info = getSelectedDateInfo();
+            if (!info) {
                 // Last-ditch: scan any attendance row marked LEAVE while a modal is open.
                 const allRows = document.querySelectorAll('.on-hover, .attendance-log-row, [class*="border-bottom"]');
                 for (const row of allRows) {
@@ -915,14 +1002,7 @@
                 }
                 return false;
             }
-            
-            // Parse the date
-            const dateMatch = selectedDateValue.match(/(\d+)\s+(\w+)\s+(\d+)/);
-            if (!dateMatch) {
-                return false;
-            }
-            
-            const [, day, month, year] = dateMatch;
+            const { day, monthName: month } = info;
             
             // Check all possible attendance row selectors
             const rowSelectors = [
@@ -972,6 +1052,32 @@
         if (!results) {
             isUpdating = false;
             return;
+        }
+
+        // Override DOM-derived totals with API-precise values when available.
+        // DOM only exposes HH:MM (no seconds), so cumulative truncation can
+        // shift work/break by ~1 min. Skipped when:
+        //   - manual mode (user is editing locally),
+        //   - the day is still in progress (API only counts closed pairs;
+        //     DOM math correctly extends the open punch to "now").
+        const hasOpenPunch =
+            (dayApiData && dayApiData.isInMissing) ||
+            Array.from(container.querySelectorAll('.d-flex.align-items-center .w-120:not(.mr-20) .text-small'))
+                .some(el => (el.textContent || '').trim() === 'MISSING');
+        if (dayApiData && !isManualMode && !results.isEmpty && !hasOpenPunch) {
+            const totalEffMins = Math.round((dayApiData.totalEffectiveHours || 0) * 60);
+            const breakMins = Math.round((dayApiData.totalBreakDuration || 0) * 60);
+            results.totalHours = totalEffMins / 60;
+            results.breakTime = breakMins;
+            results.totalDuration = formatDuration(Math.floor(totalEffMins / 60), totalEffMins % 60);
+            const firstLog = dayApiData.firstLogOfTheDay || dayApiData.validInOutPairs?.[0]?.inTime;
+            if (firstLog) {
+                const t = new Date(firstLog);
+                const hh = ((t.getHours() % 12) || 12).toString().padStart(2, '0');
+                const mm = t.getMinutes().toString().padStart(2, '0');
+                const ap = t.getHours() < 12 ? 'AM' : 'PM';
+                results.firstStartTime = `${hh}:${mm} ${ap}`;
+            }
         }
 
         // If logs are empty and NOT in manual mode, show empty state
@@ -1045,7 +1151,7 @@
                     isManualMode = true;
                     showManualForm = true;
                     manualEntries = pairs;
-                    prefillOpenStart = openStart;
+                    prefillInputs = openStart ? { start: openStart, end: '' } : null;
                     updateUI(container);
                 });
             }
@@ -1418,7 +1524,7 @@
             isManualMode = true;
             showManualForm = true;
             manualEntries = pairs;
-            prefillOpenStart = openStart;
+            prefillInputs = openStart ? { start: openStart, end: '' } : null;
             updateUI(container);
         });
 
@@ -1468,8 +1574,9 @@
             modalOpen = true;
             isHalfDayMode = false;
             isHalfDayAutoDetected = false;
+            dayApiData = null;
             updateUI(container);
-            
+
             setTimeout(() => {
                 const wasHalfDay = detectHalfDayMode();
                 if (wasHalfDay !== isHalfDayMode) {
@@ -1478,7 +1585,13 @@
                     updateUI(container);
                 }
             }, 100);
-            
+
+            loadDayAttendance().then(d => {
+                if (!modalOpen) return;
+                dayApiData = d;
+                updateUI(container);
+            });
+
             startBackgroundNotifications();
         } else if (!container && modalOpen) {
             modalOpen = false;
@@ -1487,7 +1600,8 @@
             isManualMode = false;
             manualEntries = [];
             showManualForm = false;
-            prefillOpenStart = null;
+            prefillInputs = null;
+            dayApiData = null;
             stopBackgroundNotifications();
         }
     });
