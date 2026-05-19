@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      12.0
+// @version      15.2
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -42,9 +42,6 @@
     let debugMode = false;
     let uvClickCount = 0;
     let uvClickTimer = null;
-    let cheatModeEnabled = false;
-    let cheatClickCount = 0;
-    let cheatClickTimer = null;
     let isManualMode = false;
     let manualEntries = [];
 
@@ -52,9 +49,7 @@
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
-    const MIN_WORK_PERCENTAGE = 96.87;
-    const MIN_WORK_TIME_MINUTES = 465; // 7h 45m = 96.87% of 480min
-    
+
     // Get target hours based on mode
     function getTargetHours() {
         return isHalfDayMode ? FOUR_HOURS_IN_MINUTES : EIGHT_HOURS_IN_MINUTES;
@@ -138,36 +133,6 @@
             uvClickTimer = setTimeout(() => {
                 uvClickCount = 0;
                 uvClickTimer = null;
-            }, 500);
-        }
-    }
-
-    function handleCheatModeClick() {
-        cheatClickCount++;
-        
-        if (cheatClickTimer) {
-            clearTimeout(cheatClickTimer);
-        }
-        
-        if (cheatClickCount === 6) {
-            cheatModeEnabled = !cheatModeEnabled;
-            if (debugMode) {
-                console.log(`🎯 Cheat Mode ${cheatModeEnabled ? 'ENABLED' : 'DISABLED'}`);
-            }
-            
-            const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
-            if (container) {
-                updateUI(container);
-            }
-            
-            showNotification(`Cheat Mode ${cheatModeEnabled ? 'Enabled' : 'Disabled'}! 🎯`);
-            
-            cheatClickCount = 0;
-            cheatClickTimer = null;
-        } else {
-            cheatClickTimer = setTimeout(() => {
-                cheatClickCount = 0;
-                cheatClickTimer = null;
             }, 500);
         }
     }
@@ -369,16 +334,16 @@
             <div class="manual-entry-container" style="
                 margin: 20px;
                 padding: 20px;
-                background: #ffffff;
+                background: rgba(148, 163, 184, 0.08);
                 border-radius: 16px;
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                border: 1px solid #e2e8f0;
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+                border: 1px solid rgba(148, 163, 184, 0.25);
             ">
                 <div style="
                     text-align: center;
                     margin-bottom: 20px;
                     padding-bottom: 16px;
-                    border-bottom: 2px solid #f1f5f9;
+                    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
                 ">
                     <div style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 4px;">📝 Manual Log Entry</div>
                     <div style="font-size: 13px; color: #64748b;">Add your time entries manually</div>
@@ -542,9 +507,8 @@
                 <div style="
                     text-align: center;
                     margin-top: 20px;
-                    padding: 10px 16px;
-                    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-                    border-radius: 8px;
+                    padding: 10px 16px 0;
+                    border-top: 1px solid rgba(148, 163, 184, 0.25);
                     font-size: 10px;
                     color: #94a3b8;
                     font-weight: 500;
@@ -810,120 +774,6 @@
         };
     }
 
-    function calculateCheatModeStats(firstStartTime, totalWorkedMinutes, breakTimeMinutes) {
-        if (!firstStartTime) {
-            return {
-                currentPercentage: 0,
-                status: 'red',
-                minTimeRemaining: MIN_WORK_TIME_MINUTES,
-                earlyLeaveTime: 'N/A',
-                isSafeToLeave: false
-            };
-        }
-
-        const shiftMinutes = EIGHT_HOURS_IN_MINUTES;
-        const currentPercentage = (totalWorkedMinutes / shiftMinutes) * 100;
-        
-        let status = 'red';
-        let statusText = '1 day LOP';
-        if (currentPercentage >= MIN_WORK_PERCENTAGE) {
-            status = 'green';
-            statusText = 'Safe';
-        } else if (currentPercentage >= 50) {
-            status = 'yellow';
-            statusText = '0.5 day LOP';
-        }
-
-        const minTimeRemaining = Math.max(0, MIN_WORK_TIME_MINUTES - totalWorkedMinutes);
-        const isSafeToLeave = currentPercentage >= MIN_WORK_PERCENTAGE;
-
-        const start = parseTime(firstStartTime);
-        let earlyLeaveTime = 'N/A';
-        if (start) {
-            const startDate = new Date();
-            startDate.setHours(start.hours, start.minutes, 0);
-            const leaveDate = new Date(startDate.getTime() + (MIN_WORK_TIME_MINUTES * 60 * 1000) + (breakTimeMinutes * 60 * 1000));
-            earlyLeaveTime = leaveDate.toLocaleTimeString('en-IN', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: true
-            });
-        }
-
-        return {
-            currentPercentage: currentPercentage.toFixed(2),
-            status,
-            statusText,
-            minTimeRemaining,
-            earlyLeaveTime,
-            isSafeToLeave
-        };
-    }
-
-    function calculateCheatCompletionTime(firstStartTime, totalWorkedMinutes, totalBreakTime) {
-        if (!firstStartTime) return { completionTime: 'N/A', overtime: 'N/A' };
-
-        const start = parseTime(firstStartTime);
-        if (!start) return { completionTime: 'N/A', overtime: 'N/A' };
-
-        const startDate = new Date();
-        startDate.setHours(start.hours, start.minutes, 0);
-
-        const completionDate = new Date(startDate.getTime() + (MIN_WORK_TIME_MINUTES * 60 * 1000) + (totalBreakTime * 60 * 1000));
-        let completionTime = completionDate.toLocaleTimeString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
-        });
-
-        if (totalWorkedMinutes >= MIN_WORK_TIME_MINUTES) {
-            completionTime += ' (Completed ✓)';
-        }
-
-        const overtimeMinutes = totalWorkedMinutes > MIN_WORK_TIME_MINUTES ? totalWorkedMinutes - MIN_WORK_TIME_MINUTES : 0;
-        const overtimeHours = Math.floor(overtimeMinutes / 60);
-        const overtimeMins = Math.floor(overtimeMinutes % 60);
-        const overtime = overtimeMinutes > 0 ? `${overtimeHours} Hr ${overtimeMins} Min` : 'No overtime';
-
-        return { completionTime, overtime };
-    }
-
-    function calculateCheatRemainingTime(startTimeStr, breakTimeMinutes) {
-        const start = parseTime(startTimeStr);
-        if (!start) return null;
-
-        const now = new Date();
-        const startDate = new Date();
-        startDate.setHours(start.hours, start.minutes, 0);
-
-        let elapsedMinutes = Math.floor((now - startDate) / (1000 * 60));
-        if (elapsedMinutes < 0) elapsedMinutes += 24 * 60;
-
-        const effectiveWorkMinutes = elapsedMinutes - breakTimeMinutes;
-        const remainingMinutes = MIN_WORK_TIME_MINUTES - effectiveWorkMinutes;
-
-        return {
-            remaining: Math.max(0, remainingMinutes),
-            completed: effectiveWorkMinutes >= MIN_WORK_TIME_MINUTES,
-            overtime: Math.min(0, remainingMinutes)
-        };
-    }
-
-    function formatCheatRemainingTime(minutes) {
-        if (minutes <= 0) return `7h 45m completed! 🎉`;
-
-        const hours = Math.floor(minutes / 60);
-        const mins = minutes % 60;
-
-        if (hours === 0) {
-            return `${mins} minutes`;
-        } else if (mins === 0) {
-            return `${hours} hour${hours > 1 ? 's' : ''}`;
-        } else {
-            return `${hours} hour${hours > 1 ? 's' : ''} and ${mins} minute${mins > 1 ? 's' : ''}`;
-        }
-    }
-
     function shouldNotify(remaining) {
         const hours = Math.floor(remaining / 60);
         const minutes = remaining % 60;
@@ -996,46 +846,33 @@
     function detectHalfDayMode() {
         try {
             
-            // Get the selected date with multiple attempts
-            let selectedDateInput = document.querySelector('input[formcontrolname="selectedDate"]');
-            
-            // Try alternative selectors
-            if (!selectedDateInput) {
-                selectedDateInput = document.querySelector('input[name="selectedDate"]');
+            // Get the selected date. New Keka modal exposes it as text inside
+            // <kk-text-styles label="Selected date">; legacy modal used <input formcontrolname="selectedDate">.
+            let selectedDateValue = '';
+            const dateTextEl = document.querySelector('.modal-body kk-text-styles[label="Selected date"]');
+            if (dateTextEl) {
+                selectedDateValue = (dateTextEl.innerText || dateTextEl.textContent || '').trim();
             }
-            if (!selectedDateInput) {
-                selectedDateInput = document.querySelector('.modal-body input[type="text"]');
-            }
-            
-            if (!selectedDateInput) {
-                
-                // Alternative: Get date from modal header or title
-                const modalHeader = document.querySelector('.modal-header, .modal-title');
-                if (modalHeader) {
+            if (!selectedDateValue) {
+                const selectedDateInput =
+                    document.querySelector('input[formcontrolname="selectedDate"]') ||
+                    document.querySelector('input[name="selectedDate"]') ||
+                    document.querySelector('.modal-body input[type="text"]');
+                if (selectedDateInput) {
+                    selectedDateValue = selectedDateInput.value || '';
                 }
-                
-                // Check all attendance rows for LEAVE
+            }
+
+            if (!selectedDateValue) {
+                // Last-ditch: scan any attendance row marked LEAVE while a modal is open.
                 const allRows = document.querySelectorAll('.on-hover, .attendance-log-row, [class*="border-bottom"]');
-                
                 for (const row of allRows) {
                     const rowText = row.textContent || '';
-                    
-                    // Check if this row has LEAVE and was recently clicked
                     if (rowText.includes('LEAVE') || rowText.includes('Leave')) {
-                        // Check if modal is currently open
                         const modalOpen = document.querySelector('.modal.show, .modal.fade.show');
-                        if (modalOpen) {
-                            return true;
-                        }
+                        if (modalOpen) return true;
                     }
                 }
-                
-                return false;
-            }
-            
-            const selectedDateValue = selectedDateInput.value;
-            
-            if (!selectedDateValue) {
                 return false;
             }
             
@@ -1186,37 +1023,17 @@
             return;
         }
 
-        // Calculate cheat mode stats first
-        const totalWorkedMinutes = results.totalHours * 60;
-        const cheatStats = calculateCheatModeStats(results.firstStartTime, totalWorkedMinutes, results.breakTime);
+        const normalCalc = calculateTargetCompletion(
+            results.firstStartTime,
+            results.totalHours,
+            results.breakTime
+        );
+        const completionTime = normalCalc.completionTime;
+        const overtime = normalCalc.overtime;
+        const remainingTime = calculateRemainingTime(results.firstStartTime, results.breakTime);
+        const remainingTimeStr = remainingTime ? formatSimpleRemainingTime(remainingTime.remaining) : 'N/A';
+        const targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
 
-        // Use cheat mode calculations if enabled
-        let completionTime, overtime, remainingTime, remainingTimeStr, targetHoursLabel;
-        
-        if (cheatModeEnabled) {
-            // Calculate based on 7h 45m (465 minutes)
-            const cheatCompletionTime = calculateCheatCompletionTime(results.firstStartTime, totalWorkedMinutes, results.breakTime);
-            completionTime = cheatCompletionTime.completionTime;
-            overtime = cheatCompletionTime.overtime;
-            
-            remainingTime = calculateCheatRemainingTime(results.firstStartTime, results.breakTime);
-            remainingTimeStr = remainingTime ? formatCheatRemainingTime(remainingTime.remaining) : 'N/A';
-            targetHoursLabel = '7.75hr';
-        } else {
-            // Normal calculations
-            const normalCalc = calculateTargetCompletion(
-                results.firstStartTime,
-                results.totalHours,
-                results.breakTime
-            );
-            completionTime = normalCalc.completionTime;
-            overtime = normalCalc.overtime;
-            
-            remainingTime = calculateRemainingTime(results.firstStartTime, results.breakTime);
-            remainingTimeStr = remainingTime ? formatSimpleRemainingTime(remainingTime.remaining) : 'N/A';
-            targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
-        }
-        
         document.title = `${results.totalDuration}`;
 
         // Define gradient backgrounds
@@ -1226,10 +1043,7 @@
             green: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
             orange: 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)',
             completed: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
-            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)',
-            cheatGreen: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            cheatYellow: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
-            cheatRed: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)'
         };
 
         let totalDisplay = container.querySelector('.total-duration-display');
@@ -1238,75 +1052,75 @@
             totalDisplay.className = 'total-duration-display';
             container.appendChild(totalDisplay);
         }
-        
-        // Update container styling based on cheat mode
-        if (cheatModeEnabled) {
-            const bgColor = cheatStats.status === 'green' ? 'rgba(16, 185, 129, 0.08)' : 
-                           cheatStats.status === 'yellow' ? 'rgba(251, 191, 36, 0.08)' : 
-                           'rgba(239, 68, 68, 0.08)';
-            const borderColor = cheatStats.status === 'green' ? '#10b981' : 
-                               cheatStats.status === 'yellow' ? '#fbbf24' : 
-                               '#ef4444';
-            const shadowColor = cheatStats.status === 'green' ? 'rgba(16, 185, 129, 0.2)' : 
-                               cheatStats.status === 'yellow' ? 'rgba(251, 191, 36, 0.2)' : 
-                               'rgba(239, 68, 68, 0.2)';
-            
-            totalDisplay.style.cssText = `
-                margin: 20px;
-                padding: 20px;
-                background: ${bgColor};
-                border-radius: 16px;
-                box-shadow: 0 0 30px ${shadowColor}, 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-                border: 3px solid ${borderColor};
-                transition: all 0.3s ease;
-                position: relative;
-            `;
-        } else {
-            totalDisplay.style.cssText = `
-                margin: 20px;
-                padding: 20px;
-                background: #ffffff;
-                border-radius: 16px;
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                border: 1px solid #e2e8f0;
-                transition: all 0.3s ease;
-                position: relative;
-            `;
-        }
 
         const isCompleted = remainingTime && remainingTime.completed;
 
-        // Insert or update day mode toggle
-        const selectedDateFormGroup = document.querySelector('.modal-body .form-group');
-        if (!selectedDateFormGroup) return;
-        
-        const existingCapsule = selectedDateFormGroup.querySelector('.day-mode-capsule');
+        totalDisplay.style.cssText = isCompleted ? `
+            margin: 20px;
+            padding: 20px;
+            background: rgba(16, 185, 129, 0.08);
+            border-radius: 16px;
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.2), 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border: 3px solid #10b981;
+            transition: all 0.3s ease;
+            position: relative;
+        ` : `
+            margin: 20px;
+            padding: 20px;
+            background: rgba(148, 163, 184, 0.08);
+            border-radius: 16px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            transition: all 0.3s ease;
+            position: relative;
+        `;
+
+        // Insert or update day mode toggle.
+        // Keka redesigned the modal: the date is no longer an <input>; it's plain text inside
+        // <kk-text-styles label="Selected date"> within a flex row at the top of .modal-body.
+        // Anchor to that row when present; fall back to legacy .modal-body .form-group for older tenants.
+        const selectedDateNode = document.querySelector('.modal-body kk-text-styles[label="Selected date"]');
+        const dateHeaderRow = selectedDateNode ? selectedDateNode.parentElement : null;
+        const legacyFormGroup = document.querySelector('.modal-body .form-group');
+        const capsuleHost = dateHeaderRow || legacyFormGroup;
+        if (!capsuleHost) return;
+
+        const existingCapsule = capsuleHost.querySelector('.day-mode-capsule');
         const modeGradient = isHalfDayMode ? '#f97316 0%, #ea580c 100%' : '#3b82f6 0%, #2563eb 100%';
         const modeIcon = isHalfDayMode ? '🌗' : '☀️';
         const modeText = `${isHalfDayMode ? '🌗 Half Day' : '☀️ Full Day'}${isHalfDayAutoDetected ? ' (Auto)' : ''}`;
-        
+
         if (!existingCapsule) {
-            const label = selectedDateFormGroup.querySelector('label');
-            const inputField = selectedDateFormGroup.querySelector('input');
-            
-            if (label) {
-                label.style.display = 'block';
-                label.style.marginBottom = '8px';
+            const capsuleHTML = `<div class="day-mode-capsule" style="position: relative; width: 50px; height: 32px; background: linear-gradient(135deg, ${modeGradient}); border-radius: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0; margin-left: 12px;"><span class="mode-icon" style="font-size: 18px; transition: opacity 0.3s ease; z-index: 2;">${modeIcon}</span><span class="mode-full-text" style="position: absolute; font-size: 12px; color: white; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;">${modeText}</span></div>`;
+
+            if (dateHeaderRow) {
+                dateHeaderRow.style.display = 'flex';
+                dateHeaderRow.style.alignItems = 'center';
+                dateHeaderRow.insertAdjacentHTML('beforeend', capsuleHTML);
+            } else {
+                const label = legacyFormGroup.querySelector('label');
+                const inputField = legacyFormGroup.querySelector('input');
+                if (label) {
+                    label.style.display = 'block';
+                    label.style.marginBottom = '8px';
+                }
+                if (inputField) {
+                    const inputWrapper = document.createElement('div');
+                    inputWrapper.className = 'input-toggle-wrapper';
+                    inputWrapper.style.cssText = 'display: flex; align-items: center; gap: 12px; position: relative;';
+                    inputField.className += ' input-with-toggle';
+                    inputField.style.cssText = 'width: 100%; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);';
+                    inputField.parentNode.insertBefore(inputWrapper, inputField);
+                    inputWrapper.appendChild(inputField);
+                    inputWrapper.insertAdjacentHTML('beforeend', capsuleHTML);
+                } else {
+                    legacyFormGroup.insertAdjacentHTML('beforeend', capsuleHTML);
+                }
             }
-            
-            if (inputField) {
-                const inputWrapper = document.createElement('div');
-                inputWrapper.className = 'input-toggle-wrapper';
-                inputWrapper.style.cssText = 'display: flex; align-items: center; gap: 12px; position: relative;';
-                
-                inputField.className += ' input-with-toggle';
-                inputField.style.cssText = 'width: 100%; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);';
-                inputField.parentNode.insertBefore(inputWrapper, inputField);
-                inputWrapper.appendChild(inputField);
-                
-                inputWrapper.insertAdjacentHTML('beforeend', `<div class="day-mode-capsule" style="position: relative; width: 50px; height: 32px; background: linear-gradient(135deg, ${modeGradient}); border-radius: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0;"><span class="mode-icon" style="font-size: 18px; transition: opacity 0.3s ease; z-index: 2;">${modeIcon}</span><span class="mode-full-text" style="position: absolute; font-size: 12px; color: white; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;">${modeText}</span></div>`);
-                
-                inputWrapper.querySelector('.day-mode-capsule').addEventListener('click', () => {
+
+            const capsuleEl = capsuleHost.querySelector('.day-mode-capsule');
+            if (capsuleEl) {
+                capsuleEl.addEventListener('click', () => {
                     isHalfDayMode = !isHalfDayMode;
                     isHalfDayAutoDetected = false;
                     updateUI(container);
@@ -1481,7 +1295,7 @@
                     <div class="metric-label">Overtime</div>
                     <div class="metric-value">${overtime}</div>
                 </div>
-                <div class="metric-card remaining-time-card" style="background: ${isCompleted ? gradients.completed : gradients.green}" onclick="this.dispatchEvent(new CustomEvent('cheatModeClick', {bubbles: true}))">
+                <div class="metric-card remaining-time-card" style="background: ${isCompleted ? gradients.completed : gradients.green}">
                     <div class="spark-icon">${isCompleted ? '🎉' : '⌛'}</div>
                     <div class="metric-label">Remaining Time</div>
                     <div class="metric-value">${remainingTimeStr}</div>
@@ -1514,9 +1328,8 @@
             <div style="
                 text-align: center;
                 margin-top: 20px;
-                padding: 10px 16px;
-                background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-                border-radius: 8px;
+                padding: 10px 16px 0;
+                border-top: 1px solid rgba(148, 163, 184, 0.25);
                 font-size: 10px;
                 color: #94a3b8;
                 font-weight: 500;
@@ -1553,10 +1366,6 @@
 
         totalDisplay.addEventListener('testNotification', () => {
             triggerTestNotification();
-        });
-
-        totalDisplay.addEventListener('cheatModeClick', () => {
-            handleCheatModeClick();
         });
 
         totalDisplay.addEventListener('toggleManualMode', () => {
