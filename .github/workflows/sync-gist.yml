@@ -36,3 +36,47 @@ jobs:
             -d @body.json \
             "https://api.github.com/gists/$GIST_ID" > /dev/null
           echo "Gist $GIST_ID updated from $SCRIPT_PATH"
+
+      - name: Warm raw-Gist CDN cache & verify version
+        env:
+          GIST_ID: ffc09708226db8bef988a0ecf1848518
+          SCRIPT_PATH: "Enhanced Keka Log Duration by UV with Advanced Notifications.js"
+        run: |
+          set -uo pipefail
+          extract_version() {
+            grep -m1 -oE '@version[[:space:]]+[0-9]+(\.[0-9]+)*' "$1" | awk '{print $2}'
+          }
+          REPO_VER=$(extract_version "$SCRIPT_PATH")
+          echo "Repo version: ${REPO_VER:-<unknown>}"
+
+          # Best-effort cache warm: ask Fastly to revalidate at the runner's edge.
+          # This only refreshes the POP the Actions runner happens to hit; users
+          # on other POPs still depend on their own POP's natural TTL or a
+          # browser visit. But where it lands, the new content gets served.
+          sleep 2  # let GitHub's internal cache invalidation propagate first
+          URL="https://gist.githubusercontent.com/Umang-Vadadoriya/$GIST_ID/raw/KekaEnhance.js"
+          HTTP_STATUS=$(curl -sS -o gist.js -w "%{http_code}" \
+            -H "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" \
+            -H "accept-language: en-GB,en-US;q=0.9,en;q=0.8" \
+            -H "cache-control: max-age=0" \
+            -H "sec-ch-ua: \"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"" \
+            -H "sec-ch-ua-mobile: ?0" \
+            -H "sec-ch-ua-platform: \"Linux\"" \
+            -H "sec-fetch-dest: document" \
+            -H "sec-fetch-mode: navigate" \
+            -H "sec-fetch-site: none" \
+            -H "sec-fetch-user: ?1" \
+            -H "upgrade-insecure-requests: 1" \
+            "$URL") || true
+          echo "Warm status: ${HTTP_STATUS:-fetch-failed}"
+          if [ -s gist.js ]; then
+            GIST_VER=$(extract_version gist.js)
+            echo "Gist version: ${GIST_VER:-<unknown>}"
+            if [ -n "$REPO_VER" ] && [ -n "$GIST_VER" ] && [ "$REPO_VER" = "$GIST_VER" ]; then
+              echo "::notice::Gist CDN serving fresh v${GIST_VER} ✓"
+            elif [ -n "$REPO_VER" ] && [ -n "$GIST_VER" ]; then
+              echo "::warning::Gist CDN still stale at this POP (repo=${REPO_VER}, gist=${GIST_VER}). Users on other POPs may take a few minutes to catch up."
+            fi
+          else
+            echo "::warning::Cache warm fetch returned no body (non-fatal — the gist itself is already updated)."
+          fi
