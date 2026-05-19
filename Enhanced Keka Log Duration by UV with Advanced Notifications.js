@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      18.0
+// @version      19.0
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -47,6 +47,10 @@
     let showManualForm = false;
     let prefillInputs = null; // {start, end} — applied to the manual form on next render
     let dayApiData = null;
+    let tenMinAlertFired = false; // OS notification fires once per 10-min window
+    let bannerDismissed = false;  // user-controlled banner kill-switch
+    let previewBanner = false;    // debug-mode preview override for the wrap-up banner
+    let audioCtx = null;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
@@ -110,6 +114,25 @@
         setTimeout(() => {
             showNotification('Test notification triggered! This is a 3-second delayed notification. 🔔');
         }, 3000);
+    }
+
+    function playAlertBeep() {
+        // Gate on notification permission so the beep respects the user's "mute alerts" choice.
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+        try {
+            audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.55);
+            osc.connect(gain).connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.6);
+        } catch { /* Web Audio not available */ }
     }
 
     function handleUVClick() {
@@ -862,8 +885,9 @@
     function shouldNotify(remaining) {
         const hours = Math.floor(remaining / 60);
         const minutes = remaining % 60;
-        return (hours >= 2 && hours <= 8 && minutes === 0) || 
-               (hours === 0 && [60, 50, 40, 30, 20, 15, 10, 5, 0].includes(minutes));
+        // 10-minute mark is handled by a dedicated wrap-up alert; intentionally excluded here.
+        return (hours >= 2 && hours <= 8 && minutes === 0) ||
+               (hours === 0 && [60, 50, 40, 30, 20, 15, 5, 0].includes(minutes));
     }
 
     function shouldNotifyOvertime(overtimeMinutes) {
@@ -890,7 +914,12 @@
             const remainingTime = calculateRemainingTime(lastStartTime, totalBreakTimeMinutes);
             if (!remainingTime) return;
 
-            if (remainingTime.overtime < 0) {
+            const targetLabel = isHalfDayMode ? '4h' : '8h';
+            if (!remainingTime.completed && remainingTime.remaining === 10 && !tenMinAlertFired) {
+                showNotification(`⏰ 10 minutes to ${targetLabel} — start wrapping up!`);
+                playAlertBeep();
+                tenMinAlertFired = true;
+            } else if (remainingTime.overtime < 0) {
                 const overtimeMinutes = Math.abs(remainingTime.overtime);
                 if (shouldNotifyOvertime(overtimeMinutes)) {
                     const hours = Math.floor(overtimeMinutes / 60);
@@ -904,6 +933,12 @@
                 showNotification(getRandomNotificationMessage(formatSimpleRemainingTime(remainingTime.remaining)));
             } else if (remainingTime.completed && remainingTime.remaining === 0) {
                 showNotification(`Congratulations! You've completed your ${isHalfDayMode ? 4 : 8}-hour workday! 🎉`);
+            }
+            // Re-arm the 10-min alert and the banner when the window moves out
+            // (manual edit, half-day toggle, etc.).
+            if (remainingTime.remaining > 10 || remainingTime.completed) {
+                tenMinAlertFired = false;
+                bannerDismissed = false;
             }
             updateUI(container);
         }, NOTIFICATION_INTERVAL * 60 * 1000);
@@ -1204,6 +1239,39 @@
         }
 
         const isCompleted = remainingTime && remainingTime.completed;
+        const showWrapupBanner = previewBanner || (
+            remainingTime &&
+            !remainingTime.completed &&
+            remainingTime.remaining > 0 &&
+            remainingTime.remaining <= 10 &&
+            !bannerDismissed
+        );
+        const wrapupTargetLabel = isHalfDayMode ? '4h' : '8h';
+        const wrapupRemainingLabel = remainingTime && remainingTime.remaining > 0 && remainingTime.remaining <= 10
+            ? `${remainingTime.remaining} min`
+            : '10 min';
+        const wrapupBannerHTML = showWrapupBanner ? `
+            <div class="wrapup-banner" role="alert" style="
+                margin: 0 0 16px;
+                padding: 12px 16px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                background: linear-gradient(135deg, rgba(251, 146, 60, 0.18), rgba(234, 88, 12, 0.22));
+                border: 1px solid rgba(251, 146, 60, 0.55);
+                border-radius: 12px;
+                color: inherit;
+                animation: wrapup-pulse 2.4s ease-in-out infinite;
+            ">
+                <span style="font-size: 20px;">⏰</span>
+                <div style="flex: 1; font-size: 13px; font-weight: 600;">
+                    ${wrapupRemainingLabel} left to ${wrapupTargetLabel} — start wrapping up.
+                </div>
+                <button class="wrapup-dismiss-btn" aria-label="Dismiss" title="Dismiss" style="
+                    background: transparent; border: none; color: inherit; opacity: 0.7;
+                    font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
+                ">✕</button>
+            </div>` : '';
 
         totalDisplay.style.cssText = isCompleted ? `
             margin: 20px;
@@ -1286,6 +1354,11 @@
 
         totalDisplay.innerHTML = `
             <style>
+                @keyframes wrapup-pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.7; }
+                }
+                .wrapup-dismiss-btn:hover { opacity: 1 !important; }
                 .metric-card {
                     padding: 16px;
                     border-radius: 12px;
@@ -1429,6 +1502,7 @@
                     <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
                 </svg>
             </button>
+            ${wrapupBannerHTML}
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
                     <div class="spark-icon">⏱️</div>
@@ -1458,7 +1532,7 @@
                     <div class="metric-value">${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min</div>
                 </div>
             </div>
-            ${debugMode ? `<div style="margin-top: 20px;">
+            ${debugMode ? `<div style="margin-top: 20px; display: grid; gap: 10px;">
                 <button class="test-notification-btn" style="
                     width: 100%;
                     padding: 12px 20px;
@@ -1473,6 +1547,21 @@
                     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
                 " onclick="this.dispatchEvent(new CustomEvent('testNotification', {bubbles: true}))">
                     🔔 Test Notification (3s delay)
+                </button>
+                <button class="test-wrapup-btn" style="
+                    width: 100%;
+                    padding: 12px 20px;
+                    background: linear-gradient(135deg, #fb923c 0%, #ea580c 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 10px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                " onclick="this.dispatchEvent(new CustomEvent('testWrapupAlert', {bubbles: true}))">
+                    ⏰ Preview 10-min Alert
                 </button>
             </div>` : ''}
             <div style="
@@ -1518,6 +1607,25 @@
         totalDisplay.addEventListener('testNotification', () => {
             triggerTestNotification();
         });
+
+        totalDisplay.addEventListener('testWrapupAlert', () => {
+            const targetLabel = isHalfDayMode ? '4h' : '8h';
+            showNotification(`⏰ 10 minutes to ${targetLabel} — start wrapping up!`);
+            playAlertBeep();
+            previewBanner = true;
+            bannerDismissed = false;
+            tenMinAlertFired = true;
+            updateUI(container);
+        });
+
+        const dismissBtn = totalDisplay.querySelector('.wrapup-dismiss-btn');
+        if (dismissBtn) {
+            dismissBtn.addEventListener('click', () => {
+                bannerDismissed = true;
+                previewBanner = false;
+                updateUI(container);
+            });
+        }
 
         totalDisplay.addEventListener('toggleManualMode', () => {
             const { pairs, openStart } = extractPageEntries(container);
@@ -1602,6 +1710,9 @@
             showManualForm = false;
             prefillInputs = null;
             dayApiData = null;
+            tenMinAlertFired = false;
+            bannerDismissed = false;
+            previewBanner = false;
             stopBackgroundNotifications();
         }
     });
