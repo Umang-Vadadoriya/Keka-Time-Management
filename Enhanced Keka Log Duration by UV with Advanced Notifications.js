@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      15.2
+// @version      16.1
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -44,6 +44,8 @@
     let uvClickTimer = null;
     let isManualMode = false;
     let manualEntries = [];
+    let showManualForm = false;
+    let prefillOpenStart = null;
 
     // Constants
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
@@ -304,14 +306,14 @@
                         align-items: center;
                         justify-content: space-between;
                         padding: 12px 16px;
-                        background: white;
-                        border: 2px solid #e2e8f0;
+                        background: rgba(148, 163, 184, 0.12);
+                        border: 1px solid rgba(148, 163, 184, 0.25);
                         border-radius: 10px;
                         margin-bottom: 8px;
                     ">
                         <div style="flex: 1;">
-                            <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${entry.start} - ${entry.end}</div>
-                            <div style="font-size: 12px; color: #64748b;">Duration: ${duration.hours}h ${duration.minutes}m</div>
+                            <div style="font-size: 14px; font-weight: 600; color: inherit;">${entry.start} - ${entry.end}</div>
+                            <div style="font-size: 12px; color: inherit; opacity: 0.65;">Duration: ${duration.hours}h ${duration.minutes}m</div>
                         </div>
                         <button class="remove-entry-btn" data-index="${index}" style="
                             background: ${gradients.red};
@@ -345,8 +347,8 @@
                     padding-bottom: 16px;
                     border-bottom: 1px solid rgba(148, 163, 184, 0.25);
                 ">
-                    <div style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 4px;">📝 Manual Log Entry</div>
-                    <div style="font-size: 13px; color: #64748b;">Add your time entries manually</div>
+                    <div style="font-size: 20px; font-weight: 700; color: inherit; margin-bottom: 4px;">📝 Manual Log Entry</div>
+                    <div style="font-size: 13px; color: inherit; opacity: 0.65;">Add your time entries manually</div>
                 </div>
 
                 ${previewHTML}
@@ -355,9 +357,9 @@
                 <div id="manual-error-message" style="
                     display: none;
                     padding: 12px;
-                    background: linear-gradient(135deg, #fecaca 0%, #fca5a5 100%);
+                    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
                     border-radius: 8px;
-                    color: #7f1d1d;
+                    color: white;
                     font-size: 13px;
                     font-weight: 500;
                     margin-bottom: 16px;
@@ -374,7 +376,8 @@
                             display: block;
                             font-size: 12px;
                             font-weight: 600;
-                            color: #475569;
+                            color: inherit;
+                            opacity: 0.7;
                             margin-bottom: 6px;
                         ">Start Time</label>
                         <input
@@ -384,7 +387,9 @@
                             style="
                                 width: 100%;
                                 padding: 10px 12px;
-                                border: 2px solid #e2e8f0;
+                                border: 1px solid rgba(148, 163, 184, 0.35);
+                                background: rgba(148, 163, 184, 0.08);
+                                color: inherit;
                                 border-radius: 8px;
                                 font-size: 14px;
                                 transition: border-color 0.2s;
@@ -397,7 +402,8 @@
                             display: block;
                             font-size: 12px;
                             font-weight: 600;
-                            color: #475569;
+                            color: inherit;
+                            opacity: 0.7;
                             margin-bottom: 6px;
                         ">End Time</label>
                         <input
@@ -407,7 +413,9 @@
                             style="
                                 width: 100%;
                                 padding: 10px 12px;
-                                border: 2px solid #e2e8f0;
+                                border: 1px solid rgba(148, 163, 184, 0.35);
+                                background: rgba(148, 163, 184, 0.08);
+                                color: inherit;
                                 border-radius: 8px;
                                 font-size: 14px;
                                 transition: border-color 0.2s;
@@ -453,8 +461,9 @@
                     width: 100%;
                     padding: 10px 20px;
                     background: transparent;
-                    color: #64748b;
-                    border: 2px solid #e2e8f0;
+                    color: inherit;
+                    opacity: 0.75;
+                    border: 1px solid rgba(148, 163, 184, 0.35);
                     border-radius: 10px;
                     font-size: 13px;
                     font-weight: 600;
@@ -510,7 +519,8 @@
                     padding: 10px 16px 0;
                     border-top: 1px solid rgba(148, 163, 184, 0.25);
                     font-size: 10px;
-                    color: #94a3b8;
+                    color: inherit;
+                    opacity: 0.55;
                     font-weight: 500;
                     letter-spacing: 0.5px;
                 " class="uv-signature">
@@ -529,6 +539,11 @@
         const startInput = document.getElementById('manual-start-time');
         const endInput = document.getElementById('manual-end-time');
         const errorMsg = document.getElementById('manual-error-message');
+
+        if (prefillOpenStart && startInput) {
+            startInput.value = prefillOpenStart;
+            prefillOpenStart = null;
+        }
 
         function showError(message) {
             errorMsg.textContent = message;
@@ -572,6 +587,7 @@
             calculateBtn.addEventListener('click', () => {
                 if (manualEntries.length > 0) {
                     isManualMode = true;
+                    showManualForm = false;
                     updateUI(container);
                 }
             });
@@ -580,9 +596,9 @@
         if (exitBtn) {
             exitBtn.addEventListener('click', () => {
                 isManualMode = false;
-                if (manualEntries.length === 0) {
-                    manualEntries = [];
-                }
+                showManualForm = false;
+                manualEntries = [];
+                prefillOpenStart = null;
                 updateUI(container);
             });
         }
@@ -621,12 +637,12 @@
 
         if (exitBtn) {
             exitBtn.addEventListener('mouseenter', () => {
-                exitBtn.style.borderColor = '#cbd5e1';
-                exitBtn.style.color = '#475569';
+                exitBtn.style.borderColor = 'rgba(148, 163, 184, 0.6)';
+                exitBtn.style.opacity = '1';
             });
             exitBtn.addEventListener('mouseleave', () => {
-                exitBtn.style.borderColor = '#e2e8f0';
-                exitBtn.style.color = '#64748b';
+                exitBtn.style.borderColor = 'rgba(148, 163, 184, 0.35)';
+                exitBtn.style.opacity = '0.75';
             });
         }
     }
@@ -703,6 +719,30 @@
             totalHours: totalHours + totalMins / 60,
             breakTime,
         };
+    }
+
+    function extractPageEntries(container) {
+        if (!container) return { pairs: [], openStart: null };
+        const timeRows = container.querySelectorAll('.ng-untouched.ng-pristine.ng-valid');
+        const pairs = [];
+        let openStart = null;
+        Array.from(timeRows).forEach(row => {
+            const startEl = row.querySelector('.d-flex.align-items-center .w-120.mr-20 .text-small');
+            const endEl   = row.querySelector('.d-flex.align-items-center .w-120:not(.mr-20) .text-small');
+            const rawStart = startEl ? startEl.textContent.trim() : '';
+            const rawEnd   = endEl   ? endEl.textContent.trim()   : '';
+            if (!rawStart) return;
+            const normStart = normalizeTimeFormat(rawStart);
+            if (!normStart) return;
+            if (!rawEnd || rawEnd === 'MISSING') {
+                openStart = normStart;
+                return;
+            }
+            const normEnd = normalizeTimeFormat(rawEnd);
+            if (!normEnd) return;
+            pairs.push({ start: normStart, end: normEnd });
+        });
+        return { pairs, openStart };
     }
 
     function calculateTargetCompletion(firstStartTime, totalWorkedHours, totalBreakTime) {
@@ -980,10 +1020,10 @@
                 <div style="
                     margin: 20px;
                     padding: 40px 20px;
-                    background: #ffffff;
+                    background: rgba(148, 163, 184, 0.08);
                     border-radius: 16px;
-                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-                    border: 1px solid #e2e8f0;
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+                    border: 1px solid rgba(148, 163, 184, 0.25);
                     text-align: center;
                     position: relative;
                 ">
@@ -994,23 +1034,27 @@
                         </svg>
                     </button>
                     <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;">📋</div>
-                    <div style="font-size: 18px; font-weight: 600; color: #475569; margin-bottom: 8px;">No Time Entries</div>
-                    <div style="font-size: 14px; color: #94a3b8;">Click the pen icon to add manual entries</div>
+                    <div style="font-size: 18px; font-weight: 600; color: inherit; margin-bottom: 8px;">No Time Entries</div>
+                    <div style="font-size: 14px; color: inherit; opacity: 0.6;">Click the pen icon to add manual entries</div>
                 </div>
             `;
             const manualBtn = totalDisplay.querySelector('.manual-entry-toggle-btn');
             if (manualBtn) {
                 manualBtn.addEventListener('click', () => {
+                    const { pairs, openStart } = extractPageEntries(container);
                     isManualMode = true;
+                    showManualForm = true;
+                    manualEntries = pairs;
+                    prefillOpenStart = openStart;
                     updateUI(container);
                 });
             }
             isUpdating = false;
             return;
         }
-        
+
         // If in manual mode, show manual entry UI
-        if (isManualMode && manualEntries.length === 0) {
+        if (isManualMode && showManualForm) {
             let totalDisplay = container.querySelector('.total-duration-display');
             if (!totalDisplay) {
                 totalDisplay = document.createElement('div');
@@ -1331,7 +1375,8 @@
                 padding: 10px 16px 0;
                 border-top: 1px solid rgba(148, 163, 184, 0.25);
                 font-size: 10px;
-                color: #94a3b8;
+                color: inherit;
+                opacity: 0.55;
                 font-weight: 500;
                 letter-spacing: 0.5px;
                 cursor: pointer;
@@ -1369,8 +1414,11 @@
         });
 
         totalDisplay.addEventListener('toggleManualMode', () => {
+            const { pairs, openStart } = extractPageEntries(container);
             isManualMode = true;
-            manualEntries = [];
+            showManualForm = true;
+            manualEntries = pairs;
+            prefillOpenStart = openStart;
             updateUI(container);
         });
 
@@ -1438,6 +1486,8 @@
             isHalfDayAutoDetected = false;
             isManualMode = false;
             manualEntries = [];
+            showManualForm = false;
+            prefillOpenStart = null;
             stopBackgroundNotifications();
         }
     });
