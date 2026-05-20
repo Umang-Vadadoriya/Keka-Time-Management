@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      19.2
+// @version      19.3
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -53,6 +53,7 @@
     let audioCtx = null;
 
     // Constants
+    const SCRIPT_VERSION = '19.3'; // Mirror of the UserScript @version header — bump together.
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
@@ -579,7 +580,7 @@
                     font-weight: 500;
                     letter-spacing: 0.5px;
                 " class="uv-signature">
-                    Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨
+                    Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨<span style="opacity: 0.45; font-size: 9px; margin-left: 6px; letter-spacing: 0;">v${SCRIPT_VERSION}</span>
                 </div>
             </div>
         `;
@@ -1138,17 +1139,55 @@
                 results.firstStartTime = `${hh}:${mm} ${ap}`;
                 results.firstStartDate = t;
             }
-            // Exact break milliseconds across completed pairs (closed gaps only —
-            // for an "in-progress" day this is the same set Keka uses).
+            // Exact break milliseconds across completed pairs (closed gaps).
             const pairs = dayApiData.validInOutPairs || [];
-            if (pairs.length > 1) {
-                let breakMs = 0;
-                for (let i = 1; i < pairs.length; i++) {
-                    breakMs += new Date(pairs[i].inTime) - new Date(pairs[i - 1].outTime);
+            let breakMs = 0;
+            for (let i = 1; i < pairs.length; i++) {
+                breakMs += new Date(pairs[i].inTime) - new Date(pairs[i - 1].outTime);
+            }
+            // When currently clocked in (open punch), the most recent break sits
+            // between the last closed pair's outTime and the still-open in. That
+            // gap is NOT in validInOutPairs (which only holds closed pairs), so
+            // we add it explicitly — otherwise the completion forecast comes out
+            // earlier than reality by exactly that break.
+            if (hasOpenPunch && pairs.length > 0) {
+                let openInMs = null;
+                if (dayApiData.isInMissing && dayApiData.lastLogOfTheDay) {
+                    openInMs = new Date(dayApiData.lastLogOfTheDay).getTime();
+                } else {
+                    const entries = dayApiData.timeEntries || [];
+                    for (let i = entries.length - 1; i >= 0; i--) {
+                        if (entries[i] && entries[i].punchStatus === 0) {
+                            openInMs = new Date(entries[i].timestamp).getTime();
+                            break;
+                        }
+                    }
                 }
+                // DOM fallback (HH:MM only): the row with end="MISSING".
+                if (openInMs == null) {
+                    const missingRow = Array.from(container.querySelectorAll('.ng-untouched.ng-pristine.ng-valid'))
+                        .find(row => {
+                            const endEl = row.querySelector('.d-flex.align-items-center .w-120:not(.mr-20) .text-small');
+                            return endEl && endEl.textContent.trim() === 'MISSING';
+                        });
+                    const startEl = missingRow?.querySelector('.d-flex.align-items-center .w-120.mr-20 .text-small');
+                    const raw = startEl?.textContent.trim();
+                    if (raw) {
+                        const parsed = parseTime(raw);
+                        if (parsed) {
+                            const d = new Date();
+                            d.setHours(parsed.hours, parsed.minutes, 0, 0);
+                            openInMs = d.getTime();
+                        }
+                    }
+                }
+                const lastClosedOutMs = new Date(pairs[pairs.length - 1].outTime).getTime();
+                if (openInMs != null && openInMs > lastClosedOutMs) {
+                    breakMs += openInMs - lastClosedOutMs;
+                }
+            }
+            if (pairs.length > 0) {
                 results.breakMs = breakMs;
-            } else if (pairs.length === 1) {
-                results.breakMs = 0;
             }
             // Closed-day work totals come from the API; keep DOM totals when the
             // day's still in progress.
@@ -1623,7 +1662,7 @@
                 letter-spacing: 0.5px;
                 cursor: pointer;
             " class="uv-signature">
-                Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨${debugMode ? ' <span style="color: #ef4444; font-weight: 700;">🐛 DEBUG</span>' : ''}
+                Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨<span style="opacity: 0.45; font-size: 9px; margin-left: 6px; letter-spacing: 0;">v${SCRIPT_VERSION}</span>${debugMode ? ' <span style="color: #ef4444; font-weight: 700;">🐛 DEBUG</span>' : ''}
             </div>
         `;
 
