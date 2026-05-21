@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      19.3
+// @version      19.4
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -51,9 +51,11 @@
     let bannerDismissed = false;  // user-controlled banner kill-switch
     let previewBanner = false;    // debug-mode preview override for the wrap-up banner
     let audioCtx = null;
+    let notifierPairs = [];   // validInOutPairs snapshot for second-precise live recompute
+    let notifierOpenInMs = null; // open-in timestamp when currently clocked in
 
     // Constants
-    const SCRIPT_VERSION = '19.3'; // Mirror of the UserScript @version header — bump together.
+    const SCRIPT_VERSION = '19.4'; // Mirror of the UserScript @version header — bump together.
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
@@ -815,11 +817,11 @@
     }
 
     function calculateTargetCompletion(firstStartTime, totalWorkedHours, totalBreakTime, opts) {
-        // opts: { firstStartDate?: Date, breakMs?: number } — when provided, both
-        // inputs are second-precise (from Keka's API) and the displayed completion
-        // time shows seconds too. Without opts we only have DOM HH:MM data, so we
-        // fall back to minute precision and round UP so leaving at the shown time
-        // still guarantees the target is met.
+        // opts: { firstStartDate?: Date, breakMs?: number, totalWorkSeconds?: number }
+        // - firstStartDate / breakMs feed the completion-time math at second precision.
+        // - totalWorkSeconds is the precise (API + live) total effective work seconds;
+        //   used for the (Completed ✓) flag and the overtime card so DOM minute-rounding
+        //   never flips the flag before the user has actually hit the target.
         if (!firstStartTime) return { completionTime: 'N/A', overtime: 'N/A' };
 
         const hasPreciseInputs = !!(opts && (opts.firstStartDate instanceof Date || Number.isFinite(opts.breakMs)));
@@ -835,7 +837,10 @@
         }
 
         const targetMinutes = getTargetHours();
-        const totalWorkedMinutes = totalWorkedHours * 60;
+        const targetSeconds = targetMinutes * 60;
+        const totalWorkSeconds = (opts && Number.isFinite(opts.totalWorkSeconds))
+            ? opts.totalWorkSeconds
+            : totalWorkedHours * 3600;
 
         const breakMs = (opts && Number.isFinite(opts.breakMs))
             ? opts.breakMs
@@ -855,13 +860,14 @@
             hour12: true
         });
 
-        if (totalWorkedMinutes >= targetMinutes) {
+        if (totalWorkSeconds >= targetSeconds) {
             completionTime += ' (Completed ✓)';
         }
 
-        const overtimeMinutes = totalWorkedMinutes > targetMinutes ? totalWorkedMinutes - targetMinutes : 0;
+        const overtimeSec = totalWorkSeconds > targetSeconds ? totalWorkSeconds - targetSeconds : 0;
+        const overtimeMinutes = Math.floor(overtimeSec / 60);
         const overtimeHours = Math.floor(overtimeMinutes / 60);
-        const overtimeMins = Math.floor(overtimeMinutes % 60);
+        const overtimeMins = overtimeMinutes % 60;
         const overtime = overtimeMinutes > 0 ? `${overtimeHours} Hr ${overtimeMins} Min` : 'No overtime';
 
         return { completionTime, overtime };
@@ -883,7 +889,26 @@
         }
     }
 
-    function calculateRemainingTime(startTimeStr, breakTimeMinutes) {
+    function calculateRemainingTime(startTimeStr, breakTimeMinutes, opts) {
+        // opts.totalWorkSeconds — when supplied, drives `remaining`, `completed`,
+        // and `overtime` at second precision (sourced from API pairs + live open
+        // punch). Without it, fall back to the legacy DOM-minute math.
+        const targetMinutes = getTargetHours();
+        const targetSeconds = targetMinutes * 60;
+
+        if (opts && Number.isFinite(opts.totalWorkSeconds)) {
+            const effectiveSec = opts.totalWorkSeconds;
+            const remainingSec = targetSeconds - effectiveSec;
+            // `remaining` is displayed in minutes — round to nearest so the
+            // 10-min alert fires near actual T-10 instead of drifting +/-30s.
+            const remainingMin = Math.round(remainingSec / 60);
+            return {
+                remaining: Math.max(0, remainingMin),
+                completed: effectiveSec >= targetSeconds,
+                overtime: Math.min(0, remainingMin),
+            };
+        }
+
         const start = parseTime(startTimeStr);
         if (!start) return null;
 
@@ -895,7 +920,6 @@
         if (elapsedMinutes < 0) elapsedMinutes += 24 * 60;
 
         const effectiveWorkMinutes = elapsedMinutes - breakTimeMinutes;
-        const targetMinutes = getTargetHours();
         const remainingMinutes = targetMinutes - effectiveWorkMinutes;
 
         return {
@@ -934,7 +958,23 @@
         totalBreakTimeMinutes = results ? results.breakTime : 0;
 
         notificationInterval = setInterval(() => {
-            const remainingTime = calculateRemainingTime(lastStartTime, totalBreakTimeMinutes);
+            // Recompute totalWorkSeconds live from the stashed pairs + open-in.
+            // Falls back to DOM-minute math if API data hasn't loaded yet.
+            let liveWorkSec = null;
+            if (notifierPairs && notifierPairs.length) {
+                liveWorkSec = 0;
+                for (const p of notifierPairs) {
+                    liveWorkSec += (new Date(p.outTime).getTime() - new Date(p.inTime).getTime()) / 1000;
+                }
+                if (notifierOpenInMs != null) {
+                    liveWorkSec += Math.max(0, (Date.now() - notifierOpenInMs) / 1000);
+                }
+            }
+            const remainingTime = calculateRemainingTime(
+                lastStartTime,
+                totalBreakTimeMinutes,
+                liveWorkSec != null ? { totalWorkSeconds: liveWorkSec } : undefined
+            );
             if (!remainingTime) return;
 
             const targetLabel = isHalfDayMode ? '4h' : '8h';
@@ -974,6 +1014,8 @@
         }
         lastStartTime = null;
         totalBreakTimeMinutes = 0;
+        notifierPairs = [];
+        notifierOpenInMs = null;
     }
 
     function copyToClipboard(text) {
@@ -1150,8 +1192,8 @@
             // gap is NOT in validInOutPairs (which only holds closed pairs), so
             // we add it explicitly — otherwise the completion forecast comes out
             // earlier than reality by exactly that break.
+            let openInMs = null;
             if (hasOpenPunch && pairs.length > 0) {
-                let openInMs = null;
                 if (dayApiData.isInMissing && dayApiData.lastLogOfTheDay) {
                     openInMs = new Date(dayApiData.lastLogOfTheDay).getTime();
                 } else {
@@ -1188,6 +1230,26 @@
             }
             if (pairs.length > 0) {
                 results.breakMs = breakMs;
+            }
+            // Precise total effective work seconds: closed pairs + (live open punch).
+            // Used for (Completed ✓) and overtime, so DOM minute-rounding can never
+            // flip the flag before the user has actually hit the target.
+            let totalWorkSec = 0;
+            for (const p of pairs) {
+                totalWorkSec += (new Date(p.outTime).getTime() - new Date(p.inTime).getTime()) / 1000;
+            }
+            if (hasOpenPunch && openInMs != null) {
+                totalWorkSec += Math.max(0, (Date.now() - openInMs) / 1000);
+            }
+            if (pairs.length > 0 || hasOpenPunch) {
+                results.totalWorkSeconds = totalWorkSec;
+                results.apiOpenInMs = openInMs;
+                results.apiPairs = pairs;
+                // Stash for the background notifier — it recomputes totalWorkSec
+                // each tick using Date.now() so its `completed` / `remaining` are
+                // second-precise too.
+                notifierPairs = pairs;
+                notifierOpenInMs = openInMs;
             }
             // Closed-day work totals come from the API; keep DOM totals when the
             // day's still in progress.
@@ -1297,11 +1359,19 @@
             results.firstStartTime,
             results.totalHours,
             results.breakTime,
-            { firstStartDate: results.firstStartDate, breakMs: results.breakMs }
+            {
+                firstStartDate: results.firstStartDate,
+                breakMs: results.breakMs,
+                totalWorkSeconds: results.totalWorkSeconds,
+            }
         );
         const completionTime = normalCalc.completionTime;
         const overtime = normalCalc.overtime;
-        const remainingTime = calculateRemainingTime(results.firstStartTime, results.breakTime);
+        const remainingTime = calculateRemainingTime(
+            results.firstStartTime,
+            results.breakTime,
+            Number.isFinite(results.totalWorkSeconds) ? { totalWorkSeconds: results.totalWorkSeconds } : undefined
+        );
         const remainingTimeStr = remainingTime ? formatSimpleRemainingTime(remainingTime.remaining) : 'N/A';
         const targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
 
