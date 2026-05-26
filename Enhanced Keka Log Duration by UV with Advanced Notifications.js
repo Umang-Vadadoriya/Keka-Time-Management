@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      19.6
+// @version      19.8
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -55,7 +55,7 @@
     let notifierOpenInMs = null; // open-in timestamp when currently clocked in
 
     // Constants
-    const SCRIPT_VERSION = '19.6'; // Mirror of the UserScript @version header — bump together.
+    const SCRIPT_VERSION = '19.8'; // Mirror of the UserScript @version header — bump together.
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
@@ -211,6 +211,28 @@
         const m = Math.floor((total % 3600) / 60);
         const s = total % 60;
         return `${h} Hr ${m} Min ${s} Sec`;
+    }
+
+    // HTML variant: keep the seconds inline but visually subdued, so the card
+    // still reads "8 Hr 15 Min" at-a-glance with "· 40s" as a softer suffix.
+    function formatTotalDurationHTML(totalSeconds) {
+        const total = Math.max(0, Math.floor(totalSeconds));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        return `${h} Hr ${m} Min<span style="opacity: 0.78; font-size: 0.7em; margin-left: 8px; font-weight: 500; letter-spacing: 0.3px;">· ${s}s</span>`;
+    }
+
+    // Wrap the ":SS" tail of an HH:MM:SS am/pm time-string in a subdued span,
+    // so cards reading "04:51:42 pm" render as "04:51" big + ":42" small/faded
+    // + "pm". Used by the 8hr Completion card. Anything else (incl. "N/A",
+    // "Completed ✓" suffix) passes through untouched.
+    function subdueSecondsHTML(timeStr) {
+        if (typeof timeStr !== 'string') return timeStr;
+        return timeStr.replace(
+            /(\d{1,2}:\d{2})(:\d{2})(\s*[ap]m)?/i,
+            '$1<span style="opacity: 0.78; font-size: 0.7em; margin-left: 2px; font-weight: 500; letter-spacing: 0.3px;">$2</span>$3'
+        );
     }
 
     function processManualEntries(renderOnUI = true) {
@@ -1280,8 +1302,11 @@
             // Override the displayed Total Duration with second precision whenever
             // we have a precise totalWorkSeconds (closed pairs + live open punch).
             // Sourced from validInOutPairs so it agrees with Keka to the second.
+            //   - totalDuration       → plain text ("X Hr Y Min Z Sec") for title/copy
+            //   - totalDurationHTML   → styled markup with subdued seconds for the card
             if (Number.isFinite(results.totalWorkSeconds)) {
                 results.totalDuration = formatDurationSec(results.totalWorkSeconds);
+                results.totalDurationHTML = formatTotalDurationHTML(results.totalWorkSeconds);
             }
         }
 
@@ -1686,12 +1711,12 @@
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
                     <div class="spark-icon">⏱️</div>
                     <div class="metric-label">Total Duration</div>
-                    <div class="metric-value">${results.totalDuration}</div>
+                    <div class="metric-value">${results.totalDurationHTML || results.totalDuration}</div>
                 </div>
                 <div class="metric-card" style="background: ${gradients.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
                     <div class="spark-icon">🎯</div>
                     <div class="metric-label">${targetHoursLabel} Completion</div>
-                    <div class="metric-value">${completionTime}</div>
+                    <div class="metric-value">${subdueSecondsHTML(completionTime)}</div>
                 </div>
                 <div class="metric-card" style="background: ${gradients.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
                     <div class="spark-icon">⭐</div>
