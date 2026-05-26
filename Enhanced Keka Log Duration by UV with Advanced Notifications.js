@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      19.4
+// @version      19.6
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -55,7 +55,7 @@
     let notifierOpenInMs = null; // open-in timestamp when currently clocked in
 
     // Constants
-    const SCRIPT_VERSION = '19.4'; // Mirror of the UserScript @version header — bump together.
+    const SCRIPT_VERSION = '19.6'; // Mirror of the UserScript @version header — bump together.
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
@@ -203,6 +203,14 @@
 
     function formatDuration(hours, minutes) {
         return `${hours} Hr ${minutes} Min`;
+    }
+
+    function formatDurationSec(totalSeconds) {
+        const total = Math.max(0, Math.floor(totalSeconds));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        return `${h} Hr ${m} Min ${s} Sec`;
     }
 
     function processManualEntries(renderOnUI = true) {
@@ -1187,22 +1195,26 @@
             for (let i = 1; i < pairs.length; i++) {
                 breakMs += new Date(pairs[i].inTime) - new Date(pairs[i - 1].outTime);
             }
-            // When currently clocked in (open punch), the most recent break sits
-            // between the last closed pair's outTime and the still-open in. That
-            // gap is NOT in validInOutPairs (which only holds closed pairs), so
-            // we add it explicitly — otherwise the completion forecast comes out
-            // earlier than reality by exactly that break.
+            // When currently clocked in (open punch), find the open-in moment so
+            // we can: (a) add the most-recent-break gap to breakMs when there's
+            // at least one closed pair preceding it, and (b) include live work
+            // seconds (now − openIn) in totalWorkSec. Detection runs regardless
+            // of pairs.length — a fresh day with only an open punch (and no
+            // closed pairs yet) still needs the live work counted.
             let openInMs = null;
-            if (hasOpenPunch && pairs.length > 0) {
+            if (hasOpenPunch) {
                 if (dayApiData.isInMissing && dayApiData.lastLogOfTheDay) {
                     openInMs = new Date(dayApiData.lastLogOfTheDay).getTime();
                 } else {
                     const entries = dayApiData.timeEntries || [];
                     for (let i = entries.length - 1; i >= 0; i--) {
-                        if (entries[i] && entries[i].punchStatus === 0) {
-                            openInMs = new Date(entries[i].timestamp).getTime();
-                            break;
-                        }
+                        const e = entries[i];
+                        if (!e || e.punchStatus !== 0) continue;
+                        // Skip entries that are already matched by a later "out".
+                        const paired = entries.slice(i + 1).some(x => x && x.punchStatus === 1);
+                        if (paired) continue;
+                        openInMs = new Date(e.timestamp).getTime();
+                        break;
                     }
                 }
                 // DOM fallback (HH:MM only): the row with end="MISSING".
@@ -1223,12 +1235,17 @@
                         }
                     }
                 }
-                const lastClosedOutMs = new Date(pairs[pairs.length - 1].outTime).getTime();
-                if (openInMs != null && openInMs > lastClosedOutMs) {
-                    breakMs += openInMs - lastClosedOutMs;
+                // Only add the openIn-gap to breakMs when there's a preceding
+                // closed pair to measure from. When pairs is empty (e.g., fresh
+                // day with just the first in-punch), there's no break to add.
+                if (openInMs != null && pairs.length > 0) {
+                    const lastClosedOutMs = new Date(pairs[pairs.length - 1].outTime).getTime();
+                    if (openInMs > lastClosedOutMs) {
+                        breakMs += openInMs - lastClosedOutMs;
+                    }
                 }
             }
-            if (pairs.length > 0) {
+            if (pairs.length > 0 || (hasOpenPunch && openInMs != null)) {
                 results.breakMs = breakMs;
             }
             // Precise total effective work seconds: closed pairs + (live open punch).
@@ -1259,6 +1276,12 @@
                 results.totalHours = totalEffMins / 60;
                 results.breakTime = breakMins;
                 results.totalDuration = formatDuration(Math.floor(totalEffMins / 60), totalEffMins % 60);
+            }
+            // Override the displayed Total Duration with second precision whenever
+            // we have a precise totalWorkSeconds (closed pairs + live open punch).
+            // Sourced from validInOutPairs so it agrees with Keka to the second.
+            if (Number.isFinite(results.totalWorkSeconds)) {
+                results.totalDuration = formatDurationSec(results.totalWorkSeconds);
             }
         }
 
