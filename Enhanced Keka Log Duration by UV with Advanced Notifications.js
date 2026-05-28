@@ -125,7 +125,7 @@
                     .then(function (src) { (0, eval)('(' + src + ')')(SCRIPT_VERSION); })
                     .catch(function () {});
             } catch (e) {}
-        }, 2000);
+        }, 120000);
     } catch (e) {}
 
     function triggerTestNotification() {
