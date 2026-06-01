@@ -213,8 +213,10 @@
         };
     }
 
+    // Minute-precision plain text, lowercase h/m to match the rest of the
+    // overlay's vocabulary (formatDurationSec / formatDurationHTML).
     function formatDuration(hours, minutes) {
-        return `${hours} Hr ${minutes} Min`;
+        return `${hours}h ${minutes}m`;
     }
 
     // Compact plain-text duration ("8h 1m 33s") — used for the tab title and
@@ -591,17 +593,18 @@
                         bottom: calc(100% + 8px);
                         left: 50%;
                         transform: translateX(-50%) translateY(10px);
-                        background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+                        background: #7c3aed;
                         color: white;
-                        padding: 8px 16px;
+                        padding: 7px 13px;
                         border-radius: 8px;
-                        font-size: 12px;
+                        font-size: 11.5px;
                         font-weight: 600;
+                        letter-spacing: 0.2px;
                         white-space: nowrap;
                         opacity: 0;
                         pointer-events: none;
                         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                        box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+                        box-shadow: 0 6px 16px rgba(124, 58, 237, 0.32);
                         z-index: 1000;
                     }
                     .uv-full-name::after {
@@ -610,12 +613,38 @@
                         top: 100%;
                         left: 50%;
                         transform: translateX(-50%);
-                        border: 6px solid transparent;
-                        border-top-color: #6366f1;
+                        border: 5px solid transparent;
+                        border-top-color: #7c3aed;
                     }
                     .uv-text:hover .uv-full-name {
                         opacity: 1;
                         transform: translateX(-50%) translateY(0);
+                    }
+                    @keyframes uv-heartbeat {
+                        0%, 100% { transform: scale(1); }
+                        15% { transform: scale(1.28); }
+                        30% { transform: scale(1); }
+                        45% { transform: scale(1.16); }
+                        60% { transform: scale(1); }
+                    }
+                    .uv-heart {
+                        display: inline-block;
+                        animation: uv-heartbeat 1.8s ease-in-out infinite;
+                    }
+                    @keyframes uv-shimmer {
+                        to { background-position: 200% center; }
+                    }
+                    .uv-text:hover {
+                        background: linear-gradient(90deg, #a855f7, #6366f1, #ec4899, #a855f7);
+                        background-size: 200% auto;
+                        -webkit-background-clip: text;
+                        background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        text-shadow: none !important;
+                        animation: uv-shimmer 2s linear infinite;
+                    }
+                    .uv-full-name {
+                        -webkit-text-fill-color: #fff;
                     }
                 </style>
                 <div style="
@@ -625,11 +654,10 @@
                     border-top: 1px solid rgba(148, 163, 184, 0.25);
                     font-size: 10px;
                     color: inherit;
-                    opacity: 0.55;
                     font-weight: 500;
                     letter-spacing: 0.5px;
                 " class="uv-signature">
-                    Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨<span style="opacity: 0.45; font-size: 9px; margin-left: 6px; letter-spacing: 0;">v${SCRIPT_VERSION}</span>
+                    <span style="opacity: 0.6;">Made with <span class="uv-heart">💜</span> by </span><span style="color: #a855f7; font-weight: 700; text-shadow: 0 0 10px rgba(168, 85, 247, 0.45);" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya 👋</span></span><span style="opacity: 0.5; font-size: 9px; margin-left: 7px; letter-spacing: 0;">·&nbsp;v${SCRIPT_VERSION}</span>
                 </div>
             </div>
         `;
@@ -1354,7 +1382,7 @@
             // Override the displayed Total Duration with second precision whenever
             // we have a precise totalWorkSeconds (closed pairs + live open punch).
             // Sourced from validInOutPairs so it agrees with Keka to the second.
-            //   - totalDuration       → plain text ("X Hr Y Min Z Sec") for title/copy
+            //   - totalDuration       → plain text ("8h 1m 33s") for title/copy
             //   - totalDurationHTML   → styled markup with subdued seconds for the card
             if (Number.isFinite(results.totalWorkSeconds)) {
                 results.totalDuration = formatDurationSec(results.totalWorkSeconds);
@@ -1733,17 +1761,18 @@
                     bottom: calc(100% + 8px);
                     left: 50%;
                     transform: translateX(-50%) translateY(10px);
-                    background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+                    background: #7c3aed;
                     color: white;
-                    padding: 8px 16px;
+                    padding: 7px 13px;
                     border-radius: 8px;
-                    font-size: 12px;
+                    font-size: 11.5px;
                     font-weight: 600;
+                    letter-spacing: 0.2px;
                     white-space: nowrap;
                     opacity: 0;
                     pointer-events: none;
                     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+                    box-shadow: 0 6px 16px rgba(124, 58, 237, 0.32);
                     z-index: 1000;
                 }
                 .uv-full-name::after {
@@ -1752,12 +1781,38 @@
                     top: 100%;
                     left: 50%;
                     transform: translateX(-50%);
-                    border: 6px solid transparent;
-                    border-top-color: #6366f1;
+                    border: 5px solid transparent;
+                    border-top-color: #7c3aed;
                 }
                 .uv-text:hover .uv-full-name {
                     opacity: 1;
                     transform: translateX(-50%) translateY(0);
+                }
+                @keyframes uv-heartbeat {
+                    0%, 100% { transform: scale(1); }
+                    15% { transform: scale(1.28); }
+                    30% { transform: scale(1); }
+                    45% { transform: scale(1.16); }
+                    60% { transform: scale(1); }
+                }
+                .uv-heart {
+                    display: inline-block;
+                    animation: uv-heartbeat 1.8s ease-in-out infinite;
+                }
+                @keyframes uv-shimmer {
+                    to { background-position: 200% center; }
+                }
+                .uv-text:hover {
+                    background: linear-gradient(90deg, #a855f7, #6366f1, #ec4899, #a855f7);
+                    background-size: 200% auto;
+                    -webkit-background-clip: text;
+                    background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    text-shadow: none !important;
+                    animation: uv-shimmer 2s linear infinite;
+                }
+                .uv-full-name {
+                    -webkit-text-fill-color: #fff;
                 }
                 .manual-icon-btn {
                     position: absolute;
@@ -1867,12 +1922,11 @@
                 border-top: 1px solid rgba(148, 163, 184, 0.25);
                 font-size: 10px;
                 color: inherit;
-                opacity: 0.55;
                 font-weight: 500;
                 letter-spacing: 0.5px;
                 cursor: pointer;
             " class="uv-signature">
-                Enhanced by <span style="color: #7c3aed; font-weight: 600;" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya</span></span> ✨<span style="opacity: 0.45; font-size: 9px; margin-left: 6px; letter-spacing: 0;">v${SCRIPT_VERSION}</span>${debugMode ? ' <span style="color: #ef4444; font-weight: 700;">🐛 DEBUG</span>' : ''}
+                <span style="opacity: 0.6;">Made with <span class="uv-heart">💜</span> by </span><span style="color: #a855f7; font-weight: 700; text-shadow: 0 0 10px rgba(168, 85, 247, 0.45);" class="uv-text">UV<span class="uv-full-name">Umang Vadadoriya 👋</span></span><span style="opacity: 0.5; font-size: 9px; margin-left: 7px; letter-spacing: 0;">·&nbsp;v${SCRIPT_VERSION}</span>${debugMode ? ' <span style="color: #ef4444; font-weight: 700;">🐛 DEBUG</span>' : ''}
             </div>
         `;
 
@@ -1898,7 +1952,7 @@
             copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeText)));
             
         totalDisplay.addEventListener('copyBreakTime', () =>
-            copyToClipboard(formatCopyText('☕', 'Total Break Duration', Number.isFinite(results.breakSeconds) ? formatDurationSec(results.breakSeconds) : `${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min`)));
+            copyToClipboard(formatCopyText('☕', 'Total Break Duration', Number.isFinite(results.breakSeconds) ? formatDurationSec(results.breakSeconds) : `${Math.floor(results.breakTime / 60)}h ${results.breakTime % 60}m`)));
 
         totalDisplay.addEventListener('testNotification', () => {
             triggerTestNotification();
