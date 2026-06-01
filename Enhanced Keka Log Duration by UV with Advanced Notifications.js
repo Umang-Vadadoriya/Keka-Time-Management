@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      19.8
+// @version      20.1
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -30,10 +30,22 @@
 (function () {
     'use strict';
 
+    // Single-instance guard. The bookmarklet path (fetch + eval) re-runs this whole
+    // IIFE on every click, so an impatient double-click would otherwise spin up a
+    // second MutationObserver + duplicate background timers (→ duplicate notifications
+    // and redundant renders). The visible overlay stays correct (renders are
+    // idempotent), but the timers stack. Bail out if we're already loaded.
+    // A hard page refresh resets this flag (fresh page context), so the documented
+    // "click again after a full refresh" flow still works — only same-session
+    // re-clicks become no-ops.
+    if (window.__kekaEnhanceLoaded) return;
+    window.__kekaEnhanceLoaded = true;
+
     // Global state variables
     let modalOpen = false;
     let lastStartTime = null;
     let notificationInterval = null;
+    let renderInterval = null; // 1s live re-render of the overlay while clocked in
     let totalBreakTimeMinutes = 0;
     let notificationCounter = 0;
     let isUpdating = false;
@@ -55,7 +67,7 @@
     let notifierOpenInMs = null; // open-in timestamp when currently clocked in
 
     // Constants
-    const SCRIPT_VERSION = '19.8'; // Mirror of the UserScript @version header — bump together.
+    const SCRIPT_VERSION = '20.1'; // Mirror of the UserScript @version header — bump together.
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
@@ -205,22 +217,27 @@
         return `${hours} Hr ${minutes} Min`;
     }
 
+    // Compact plain-text duration ("8h 1m 33s") — used for the tab title and
+    // clipboard copy. Shares the same h/m/s vocabulary as the on-card markup.
     function formatDurationSec(totalSeconds) {
         const total = Math.max(0, Math.floor(totalSeconds));
         const h = Math.floor(total / 3600);
         const m = Math.floor((total % 3600) / 60);
         const s = total % 60;
-        return `${h} Hr ${m} Min ${s} Sec`;
+        return `${h}h ${m}m ${s}s`;
     }
 
-    // HTML variant: keep the seconds inline but visually subdued, so the card
-    // still reads "8 Hr 15 Min" at-a-glance with "· 40s" as a softer suffix.
-    function formatTotalDurationHTML(totalSeconds) {
+    // Shared compact duration markup for EVERY metric card (Total, Overtime,
+    // Break, Remaining) so the whole overlay speaks one time vocabulary.
+    // Digits render with tabular figures (set on .metric-value) so live-ticking
+    // values don't jitter; unit letters are small/faded and the trailing seconds
+    // are subdued — reads "8h 1m" at a glance with "·33s" as a quiet suffix.
+    function formatDurationHTML(totalSeconds) {
         const total = Math.max(0, Math.floor(totalSeconds));
         const h = Math.floor(total / 3600);
         const m = Math.floor((total % 3600) / 60);
         const s = total % 60;
-        return `${h} Hr ${m} Min<span style="opacity: 0.78; font-size: 0.7em; margin-left: 8px; font-weight: 500; letter-spacing: 0.3px;">· ${s}s</span>`;
+        return `${h}<span class="dur-u">h</span> ${m}<span class="dur-u">m</span><span class="dur-s">·&nbsp;${s}s</span>`;
     }
 
     // Wrap the ":SS" tail of an HH:MM:SS am/pm time-string in a subdued span,
@@ -894,13 +911,11 @@
             completionTime += ' (Completed ✓)';
         }
 
-        const overtimeSec = totalWorkSeconds > targetSeconds ? totalWorkSeconds - targetSeconds : 0;
-        const overtimeMinutes = Math.floor(overtimeSec / 60);
-        const overtimeHours = Math.floor(overtimeMinutes / 60);
-        const overtimeMins = overtimeMinutes % 60;
-        const overtime = overtimeMinutes > 0 ? `${overtimeHours} Hr ${overtimeMins} Min` : 'No overtime';
+        const overtimeSec = totalWorkSeconds > targetSeconds ? Math.floor(totalWorkSeconds - targetSeconds) : 0;
+        const overtime = overtimeSec > 0 ? formatDurationSec(overtimeSec) : 'No overtime';
+        const overtimeHTML = overtimeSec > 0 ? formatDurationHTML(overtimeSec) : 'No overtime';
 
-        return { completionTime, overtime };
+        return { completionTime, overtime, overtimeHTML };
     }
 
     function formatSimpleRemainingTime(minutes) {
@@ -934,6 +949,7 @@
             const remainingMin = Math.round(remainingSec / 60);
             return {
                 remaining: Math.max(0, remainingMin),
+                remainingSeconds: Math.max(0, remainingSec),
                 completed: effectiveSec >= targetSeconds,
                 overtime: Math.min(0, remainingMin),
             };
@@ -976,6 +992,7 @@
 
     function startBackgroundNotifications() {
         if (notificationInterval) clearInterval(notificationInterval);
+        if (isViewingOtherEmployee()) return;   // read-only inspection: no personal alerts/live tick
 
         const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
         if (!container) return;
@@ -1035,12 +1052,29 @@
             }
             updateUI(container);
         }, NOTIFICATION_INTERVAL * 60 * 1000);
+
+        // Live ticking: re-render the overlay every second so the second-precision
+        // numbers (Total Duration / completion / remaining) actually move in real
+        // time instead of only refreshing on the 1-minute notification cadence.
+        // Guards:
+        //   - only while a punch is open (notifierOpenInMs != null); a closed day's
+        //     totals are static, so there's nothing to tick.
+        //   - skip while the manual-entry form is showing, since updateUI rebuilds
+        //     the overlay markup and would steal focus from what the user is typing.
+        renderInterval = setInterval(() => {
+            if (!modalOpen || showManualForm || notifierOpenInMs == null) return;
+            updateUI(container);
+        }, 1000);
     }
 
     function stopBackgroundNotifications() {
         if (notificationInterval) {
             clearInterval(notificationInterval);
             notificationInterval = null;
+        }
+        if (renderInterval) {
+            clearInterval(renderInterval);
+            renderInterval = null;
         }
         lastStartTime = null;
         totalBreakTimeMinutes = 0;
@@ -1109,7 +1143,19 @@
         }
     }
 
+    // True when the page is showing a specific employee's attendance via the
+    // manager/admin route (e.g. "#/employee/000000/time/attendance/logs").
+    // The token owner's own attendance uses the personal "/me/..." route, which
+    // has no "/employee/{id}/" segment, so this returns false for them. When
+    // viewing someone else we skip the (token-scoped) API entirely and let the
+    // DOM-only math — which reads the viewed employee's own modal rows — drive
+    // every stat, so we never show the viewer's data on a colleague's page.
+    function isViewingOtherEmployee() {
+        return /\/employee\/\d+\//.test(location.hash || '');
+    }
+
     async function loadDayAttendance() {
+        if (isViewingOtherEmployee()) return null;   // other employee → DOM-only math
         const info = getSelectedDateInfo();
         if (!info) return null;
         const days = await fetchMonthAttendance(info.monthKey);
@@ -1290,14 +1336,20 @@
                 notifierPairs = pairs;
                 notifierOpenInMs = openInMs;
             }
-            // Closed-day work totals come from the API; keep DOM totals when the
-            // day's still in progress.
+            // Closed-day work totals come from the API; keep live DOM-extended
+            // totals when the day's still in progress (Total Duration below is
+            // re-derived from totalWorkSeconds either way).
             if (!hasOpenPunch) {
                 const totalEffMins = Math.round((dayApiData.totalEffectiveHours || 0) * 60);
-                const breakMins = Math.round((dayApiData.totalBreakDuration || 0) * 60);
                 results.totalHours = totalEffMins / 60;
-                results.breakTime = breakMins;
                 results.totalDuration = formatDuration(Math.floor(totalEffMins / 60), totalEffMins % 60);
+            }
+            // Break is always API-sourced and second-precise — from the gaps
+            // between validInOutPairs (breakMs), including the in-progress case
+            // where breakMs already covers the gap up to the current open-in.
+            if (Number.isFinite(results.breakMs)) {
+                results.breakSeconds = Math.floor(results.breakMs / 1000);
+                results.breakTime = Math.round(results.breakMs / 60000);
             }
             // Override the displayed Total Duration with second precision whenever
             // we have a precise totalWorkSeconds (closed pairs + live open punch).
@@ -1306,7 +1358,7 @@
             //   - totalDurationHTML   → styled markup with subdued seconds for the card
             if (Number.isFinite(results.totalWorkSeconds)) {
                 results.totalDuration = formatDurationSec(results.totalWorkSeconds);
-                results.totalDurationHTML = formatTotalDurationHTML(results.totalWorkSeconds);
+                results.totalDurationHTML = formatDurationHTML(results.totalWorkSeconds);
             }
         }
 
@@ -1415,12 +1467,28 @@
         );
         const completionTime = normalCalc.completionTime;
         const overtime = normalCalc.overtime;
+        const overtimeHTML = normalCalc.overtimeHTML || normalCalc.overtime;
         const remainingTime = calculateRemainingTime(
             results.firstStartTime,
             results.breakTime,
             Number.isFinite(results.totalWorkSeconds) ? { totalWorkSeconds: results.totalWorkSeconds } : undefined
         );
-        const remainingTimeStr = remainingTime ? formatSimpleRemainingTime(remainingTime.remaining) : 'N/A';
+        // Remaining shares the compact h/m/s markup with the other cards. When
+        // the target's met we show a short "done" label instead of a duration
+        // (the green gradient + 🎉 spark already signal completion).
+        let remainingTimeStr;   // HTML for the card
+        let remainingTimeText;  // plain text for clipboard
+        if (!remainingTime) {
+            remainingTimeStr = remainingTimeText = 'N/A';
+        } else if (remainingTime.completed) {
+            remainingTimeStr = remainingTimeText = `${isHalfDayMode ? 4 : 8}h done 🎉`;
+        } else {
+            const remSec = Number.isFinite(remainingTime.remainingSeconds)
+                ? remainingTime.remainingSeconds
+                : remainingTime.remaining * 60;
+            remainingTimeStr = formatDurationHTML(remSec);
+            remainingTimeText = formatDurationSec(remSec);
+        }
         const targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
 
         document.title = `${results.totalDuration}`;
@@ -1572,7 +1640,11 @@
                     overflow: hidden;
                     cursor: pointer;
                 }
-                .metric-card:hover {
+                /* Remaining Time isn't copyable — don't promise interactivity. */
+                .remaining-time-card {
+                    cursor: default;
+                }
+                .metric-card:not(.remaining-time-card):hover {
                     transform: translateY(-2px);
                 }
                 .metric-card::before {
@@ -1586,7 +1658,7 @@
                     opacity: 0;
                     transition: opacity 0.2s ease-in-out;
                 }
-                .metric-card:hover::before {
+                .metric-card:not(.remaining-time-card):hover::before {
                     opacity: 1;
                 }
                 .metric-label {
@@ -1599,6 +1671,26 @@
                     font-size: 18px;
                     font-weight: 600;
                     letter-spacing: 0.5px;
+                    /* inherit Keka's font; tabular figures only so the live-ticking
+                       seconds don't shift the value's width as they change. */
+                    font-variant-numeric: tabular-nums;
+                    font-feature-settings: 'tnum' 1;
+                }
+                /* unit letters (h/m/s) — smaller and slightly faded so the
+                   numbers lead, matching the subdued-seconds treatment. */
+                .metric-value .dur-u {
+                    font-size: 0.62em;
+                    font-weight: 500;
+                    opacity: 0.78;
+                    margin-left: 1px;
+                }
+                /* trailing seconds — quiet suffix */
+                .metric-value .dur-s {
+                    font-size: 0.7em;
+                    font-weight: 500;
+                    opacity: 0.78;
+                    margin-left: 8px;
+                    letter-spacing: 0.3px;
                 }
                 .spark-icon {
                     position: absolute;
@@ -1711,7 +1803,7 @@
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
                     <div class="spark-icon">⏱️</div>
                     <div class="metric-label">Total Duration</div>
-                    <div class="metric-value">${results.totalDurationHTML || results.totalDuration}</div>
+                    <div class="metric-value">${results.totalDurationHTML || formatDurationHTML((results.totalHours || 0) * 3600)}</div>
                 </div>
                 <div class="metric-card" style="background: ${gradients.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
                     <div class="spark-icon">🎯</div>
@@ -1721,7 +1813,7 @@
                 <div class="metric-card" style="background: ${gradients.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
                     <div class="spark-icon">⭐</div>
                     <div class="metric-label">Overtime</div>
-                    <div class="metric-value">${overtime}</div>
+                    <div class="metric-value">${overtimeHTML}</div>
                 </div>
                 <div class="metric-card remaining-time-card" style="background: ${isCompleted ? gradients.completed : gradients.green}">
                     <div class="spark-icon">${isCompleted ? '🎉' : '⌛'}</div>
@@ -1733,7 +1825,7 @@
                 <div class="metric-card" style="background: ${gradients.pink}" onclick="this.dispatchEvent(new CustomEvent('copyBreakTime', {bubbles: true}))">
                     <div class="spark-icon">☕</div>
                     <div class="metric-label">Total Break Duration</div>
-                    <div class="metric-value">${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min</div>
+                    <div class="metric-value">${formatDurationHTML((Number.isFinite(results.breakSeconds) ? results.breakSeconds : (results.breakTime || 0) * 60))}</div>
                 </div>
             </div>
             ${debugMode ? `<div style="margin-top: 20px; display: grid; gap: 10px;">
@@ -1802,11 +1894,11 @@
         totalDisplay.addEventListener('copyOvertime', () => 
             copyToClipboard(formatCopyText('⭐', 'Overtime', overtime)));
         
-        totalDisplay.addEventListener('copyRemaining', () => 
-            copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeStr)));
+        totalDisplay.addEventListener('copyRemaining', () =>
+            copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeText)));
             
-        totalDisplay.addEventListener('copyBreakTime', () => 
-            copyToClipboard(formatCopyText('☕', 'Total Break Duration', `${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min`)));
+        totalDisplay.addEventListener('copyBreakTime', () =>
+            copyToClipboard(formatCopyText('☕', 'Total Break Duration', Number.isFinite(results.breakSeconds) ? formatDurationSec(results.breakSeconds) : `${Math.floor(results.breakTime / 60)} Hr ${results.breakTime % 60} Min`)));
 
         totalDisplay.addEventListener('testNotification', () => {
             triggerTestNotification();
@@ -1921,5 +2013,62 @@
         }
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    // One-time "it loaded" confirmation. The main overlay only appears once a
+    // Regularize modal is opened, so a fresh bookmarklet click otherwise looks
+    // like nothing happened. This reassures the user it's active. Styling mirrors
+    // the signature tooltip (purple→indigo gradient, 8px radius, 12px/600 text).
+    function showActivationToast() {
+        if (document.getElementById('uv-activation-toast')) return; // avoid dupes on re-click
+        const toast = document.createElement('div');
+        toast.id = 'uv-activation-toast';
+        toast.textContent = '✅  Keka helper active. Open any day to see your duration';
+        toast.style.cssText = `
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-14px);
+            background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+            color: white;
+            padding: 12px 22px;
+            border-radius: 10px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.45);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 999999;
+        `;
+        document.body.appendChild(toast);
+
+        // Fade + slide down from the top on next frame so the transition runs.
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(-50%) translateY(0)';
+        });
+
+        // Fade out (back up toward the top), then remove from the DOM.
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(-50%) translateY(-14px)';
+            setTimeout(() => toast.remove(), 350);
+        }, 2600);
+    }
+
+    // Start observing + show the toast once the DOM is ready. If the bookmarklet is
+    // clicked while the page is still loading, document.body may not exist yet —
+    // calling observer.observe(null) or appending the toast would throw. Defer to
+    // DOMContentLoaded in that case so an early click still works (and still shows
+    // the confirmation toast) instead of silently failing.
+    function startKekaEnhance() {
+        observer.observe(document.body, { childList: true, subtree: true });
+        showActivationToast();
+    }
+    if (document.body) {
+        startKekaEnhance();
+    } else {
+        document.addEventListener('DOMContentLoaded', startKekaEnhance, { once: true });
+    }
 })();
