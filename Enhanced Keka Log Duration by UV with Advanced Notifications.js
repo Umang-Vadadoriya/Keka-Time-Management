@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      20.1
+// @version      20.2
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -67,7 +67,7 @@
     let notifierOpenInMs = null; // open-in timestamp when currently clocked in
 
     // Constants
-    const SCRIPT_VERSION = '20.1'; // Mirror of the UserScript @version header — bump together.
+    const SCRIPT_VERSION = '20.2'; // Mirror of the UserScript @version header — bump together.
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1; // minutes
@@ -1020,6 +1020,7 @@
 
     function startBackgroundNotifications() {
         if (notificationInterval) clearInterval(notificationInterval);
+        if (renderInterval) clearInterval(renderInterval);   // avoid leaking a prior 1s timer on re-open
         if (isViewingOtherEmployee()) return;   // read-only inspection: no personal alerts/live tick
 
         const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
@@ -1247,6 +1248,7 @@
     const updateUI = debounce((container) => {
         if (!container || isUpdating) return;
         isUpdating = true;
+        try {
         const modalDialog = document.querySelector('.modal-dialog.right-modal.right-modal-450');
         if (modalDialog) {
             modalDialog.style.width = '500px';
@@ -1993,7 +1995,12 @@
 
         // Manual entry button hover is handled by CSS
 
-        isUpdating = false;
+        } finally {
+            // ALWAYS clear the flag, even if any of the above threw. A stuck
+            // `isUpdating` used to jam the observer permanently (modal reopen /
+            // post-notification reopen silently doing nothing until page reload).
+            isUpdating = false;
+        }
     }, 250);
 
     // Add styles for duration capsules
@@ -2015,8 +2022,12 @@
 
     // Initialize observer
     const observer = new MutationObserver(() => {
-        if (isUpdating) return;
-        
+        // No isUpdating guard here on purpose: the open/close logic below only
+        // fires on a container-presence *transition* (gated by `modalOpen`), so
+        // updateUI's own DOM writes never re-enter it. A previous `isUpdating`
+        // guard let an in-flight render swallow the modal-close mutation, leaving
+        // `modalOpen` stuck true so the next open silently did nothing.
+
         // Check for both possible containers: logs (with entries) or premises (without entries)
         let container = document.querySelector('.modal-body form div[formarrayname="logs"]');
         
