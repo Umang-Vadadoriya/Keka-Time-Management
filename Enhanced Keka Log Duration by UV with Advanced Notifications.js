@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      20.2
+// @version      20.4
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -26,26 +26,17 @@
 // @copyright    2026, Umang Vadadoriya (https://github.com/Umang-Vadadoriya)
 // ==/UserScript==
 
-
 (function () {
     'use strict';
 
-    // Single-instance guard. The bookmarklet path (fetch + eval) re-runs this whole
-    // IIFE on every click, so an impatient double-click would otherwise spin up a
-    // second MutationObserver + duplicate background timers (→ duplicate notifications
-    // and redundant renders). The visible overlay stays correct (renders are
-    // idempotent), but the timers stack. Bail out if we're already loaded.
-    // A hard page refresh resets this flag (fresh page context), so the documented
-    // "click again after a full refresh" flow still works — only same-session
-    // re-clicks become no-ops.
     if (window.__kekaEnhanceLoaded) return;
     window.__kekaEnhanceLoaded = true;
 
-    // Global state variables
     let modalOpen = false;
     let lastStartTime = null;
     let notificationInterval = null;
-    let renderInterval = null; // 1s live re-render of the overlay while clocked in
+    let renderInterval = null;
+    let manualTickInterval = null;
     let totalBreakTimeMinutes = 0;
     let notificationCounter = 0;
     let isUpdating = false;
@@ -57,27 +48,24 @@
     let isManualMode = false;
     let manualEntries = [];
     let showManualForm = false;
-    let prefillInputs = null; // {start, end} — applied to the manual form on next render
+    let prefillInputs = null;
     let dayApiData = null;
-    let tenMinAlertFired = false; // OS notification fires once per 10-min window
-    let bannerDismissed = false;  // user-controlled banner kill-switch
-    let previewBanner = false;    // debug-mode preview override for the wrap-up banner
+    let tenMinAlertFired = false;
+    let bannerDismissed = false;
+    let previewBanner = false;
     let audioCtx = null;
-    let notifierPairs = [];   // validInOutPairs snapshot for second-precise live recompute
-    let notifierOpenInMs = null; // open-in timestamp when currently clocked in
+    let notifierPairs = [];
+    let notifierOpenInMs = null;
 
-    // Constants
-    const SCRIPT_VERSION = '20.2'; // Mirror of the UserScript @version header — bump together.
+    const SCRIPT_VERSION = '20.4';
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
-    const NOTIFICATION_INTERVAL = 1; // minutes
+    const NOTIFICATION_INTERVAL = 1;
 
-    // Get target hours based on mode
     function getTargetHours() {
         return isHalfDayMode ? FOUR_HOURS_IN_MINUTES : EIGHT_HOURS_IN_MINUTES;
     }
 
-    // Notification messages array
     const NOTIFICATION_MESSAGES = [
         "Time check! {remaining} left in your workday. Keep going! 💠",
         "Quick update: {remaining} until you hit your 8-hour mark! 🎯",
@@ -89,12 +77,10 @@
         "Almost there! {remaining} left in your workday. You're doing great! ⭐"
     ];
 
-    // Request notification permission on script load
     if (Notification.permission === 'default') {
         Notification.requestPermission();
     }
 
-    // Utility functions
     function debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
@@ -117,7 +103,7 @@
                 renotify: true,
                 silent: false
             });
-            
+
             notification.onclick = () => {
                 window.focus();
                 notification.close();
@@ -132,7 +118,7 @@
     }
 
     function playAlertBeep() {
-        // Gate on notification permission so the beep respects the user's "mute alerts" choice.
+
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
         try {
             audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -147,27 +133,27 @@
             osc.connect(gain).connect(audioCtx.destination);
             osc.start();
             osc.stop(audioCtx.currentTime + 0.6);
-        } catch { /* Web Audio not available */ }
+        } catch {  }
     }
 
     function handleUVClick() {
         uvClickCount++;
-        
+
         if (uvClickTimer) {
             clearTimeout(uvClickTimer);
         }
-        
+
         if (uvClickCount === 3) {
             debugMode = !debugMode;
             console.log(`🐛 Debug Mode ${debugMode ? 'ENABLED' : 'DISABLED'}`);
-            
+
             const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
             if (container) {
                 updateUI(container);
             }
-            
+
             showNotification(`Debug Mode ${debugMode ? 'Enabled' : 'Disabled'}! 🐛`);
-            
+
             uvClickCount = 0;
             uvClickTimer = null;
         } else {
@@ -213,14 +199,22 @@
         };
     }
 
-    // Minute-precision plain text, lowercase h/m to match the rest of the
-    // overlay's vocabulary (formatDurationSec / formatDurationHTML).
+    function timeToTodayMs(timeStr) {
+        const t = parseTime(timeStr);
+        if (!t) return null;
+        const d = new Date();
+        d.setHours(t.hours, t.minutes, 0, 0);
+        return d.getTime();
+    }
+    function startMinutesOf(entry) {
+        const t = parseTime(entry.start);
+        return t ? t.hours * 60 + t.minutes : 0;
+    }
+
     function formatDuration(hours, minutes) {
         return `${hours}h ${minutes}m`;
     }
 
-    // Compact plain-text duration ("8h 1m 33s") — used for the tab title and
-    // clipboard copy. Shares the same h/m/s vocabulary as the on-card markup.
     function formatDurationSec(totalSeconds) {
         const total = Math.max(0, Math.floor(totalSeconds));
         const h = Math.floor(total / 3600);
@@ -229,11 +223,6 @@
         return `${h}h ${m}m ${s}s`;
     }
 
-    // Shared compact duration markup for EVERY metric card (Total, Overtime,
-    // Break, Remaining) so the whole overlay speaks one time vocabulary.
-    // Digits render with tabular figures (set on .metric-value) so live-ticking
-    // values don't jitter; unit letters are small/faded and the trailing seconds
-    // are subdued — reads "8h 1m" at a glance with "·33s" as a quiet suffix.
     function formatDurationHTML(totalSeconds) {
         const total = Math.max(0, Math.floor(totalSeconds));
         const h = Math.floor(total / 3600);
@@ -242,10 +231,6 @@
         return `${h}<span class="dur-u">h</span> ${m}<span class="dur-u">m</span><span class="dur-s">·&nbsp;${s}s</span>`;
     }
 
-    // Wrap the ":SS" tail of an HH:MM:SS am/pm time-string in a subdued span,
-    // so cards reading "04:51:42 pm" render as "04:51" big + ":42" small/faded
-    // + "pm". Used by the 8hr Completion card. Anything else (incl. "N/A",
-    // "Completed ✓" suffix) passes through untouched.
     function subdueSecondsHTML(timeStr) {
         if (typeof timeStr !== 'string') return timeStr;
         return timeStr.replace(
@@ -259,47 +244,95 @@
             return { isEmpty: true, totalDuration: 'N/A', firstStartTime: null, totalHours: 0, breakTime: 0 };
         }
 
-        let totalMinutes = 0;
-        let firstStartTime = manualEntries[0].start;
-        let breakTime = 0;
+        manualEntries.sort((a, b) => startMinutesOf(a) - startMinutesOf(b));
 
-        manualEntries.forEach((entry, index) => {
-            const duration = calculateDuration(entry.start, entry.end);
-            totalMinutes += duration.hours * 60 + duration.minutes;
+        const now = Date.now();
+        let totalWorkMs = 0;
+        let breakMs = 0;
+        let openStartMs = null;
+        let prevEndMs = null;
+        const firstStartMs = timeToTodayMs(manualEntries[0].start);
 
-            // Calculate break time between entries
-            if (index > 0) {
-                const prevEndTime = manualEntries[index - 1].end;
-                const currentStartTime = entry.start;
-                const breakDuration = calculateDuration(prevEndTime, currentStartTime);
-                breakTime += breakDuration.hours * 60 + breakDuration.minutes;
+        manualEntries.forEach((entry) => {
+            const sMs = timeToTodayMs(entry.start);
+            if (sMs == null) return;
+            if (prevEndMs != null && sMs > prevEndMs) breakMs += sMs - prevEndMs;
+            if (!entry.end) {
+                totalWorkMs += Math.max(0, now - sMs);
+                openStartMs = sMs;
+                prevEndMs = now;
+            } else {
+                const eMs = timeToTodayMs(entry.end);
+                totalWorkMs += Math.max(0, eMs - sMs);
+                prevEndMs = eMs;
             }
         });
 
-        const totalHours = Math.floor(totalMinutes / 60);
-        const totalMins = totalMinutes % 60;
+        const totalWorkSeconds = totalWorkMs / 1000;
 
         return {
-            totalDuration: formatDuration(totalHours, totalMins),
-            firstStartTime,
-            totalHours: totalHours + totalMins / 60,
-            breakTime,
+            totalWorkSeconds,
+            totalDuration: formatDurationSec(totalWorkSeconds),
+            totalDurationHTML: formatDurationHTML(totalWorkSeconds),
+            totalHours: totalWorkSeconds / 3600,
+            breakMs,
+            breakSeconds: Math.floor(breakMs / 1000),
+            breakTime: Math.round(breakMs / 60000),
+            firstStartTime: manualEntries[0].start,
+            firstStartDate: firstStartMs != null ? new Date(firstStartMs) : undefined,
+            manualOpenStartMs: openStartMs,
             isManual: true
         };
     }
 
+    function punchMinutes(t) {
+        const p = parseTime(t);
+        return p ? p.hours * 60 + p.minutes : 0;
+    }
+    function flattenPunches() {
+        const punches = [];
+        manualEntries.forEach(e => {
+            if (e.start) punches.push(e.start);
+            if (e.end) punches.push(e.end);
+        });
+        return punches.sort((a, b) => punchMinutes(a) - punchMinutes(b));
+    }
+
+    function repairFromPunches(punches) {
+        const sorted = [...punches].sort((a, b) => punchMinutes(a) - punchMinutes(b));
+        const pairs = [];
+        for (let i = 0; i < sorted.length; i += 2) {
+            pairs.push({ start: sorted[i], end: sorted[i + 1] || null });
+        }
+        manualEntries = pairs;
+    }
+    function insertPunch(timeStr) {
+        const n = normalizeTimeFormat(timeStr);
+        if (!n) return false;
+        const p = flattenPunches();
+        p.push(n);
+        repairFromPunches(p);
+        return true;
+    }
+    function removePunchAt(index) {
+        const p = flattenPunches();
+        if (index < 0 || index >= p.length) return;
+        p.splice(index, 1);
+        repairFromPunches(p);
+    }
+
     function validateTimeFormat(timeStr) {
-        // Validates time format: HH:MM AM/PM
+
         const timeRegex = /^(0?[1-9]|1[0-2]):([0-5][0-9])\s?(AM|PM|am|pm)$/i;
         return timeRegex.test(timeStr.trim());
     }
 
     function normalizeTimeFormat(timeStr) {
-        // Normalize time format to match existing format
+
         const trimmed = timeStr.trim();
         const match = trimmed.match(/^(0?[1-9]|1[0-2]):([0-5][0-9])\s?(AM|PM|am|pm)$/i);
         if (!match) return null;
-        
+
         const [, hours, minutes, period] = match;
         const paddedHours = hours.padStart(2, '0');
         return `${paddedHours}:${minutes} ${period.toUpperCase()}`;
@@ -308,37 +341,37 @@
     function isStartBeforeEnd(startTime, endTime) {
         const start = parseTime(startTime);
         const end = parseTime(endTime);
-        
+
         if (!start || !end) return false;
-        
+
         const startMinutes = start.hours * 60 + start.minutes;
         const endMinutes = end.hours * 60 + end.minutes;
-        
+
         return startMinutes < endMinutes;
     }
 
     function validateManualEntry(startTime, endTime) {
         const errors = [];
-        
+        const hasEnd = !!(endTime && endTime.trim() !== '');
+
         if (!startTime || startTime.trim() === '') {
             errors.push('Start time is required');
         } else if (!validateTimeFormat(startTime)) {
             errors.push('Invalid start time format. Use HH:MM AM/PM (e.g., 9:00 AM)');
         }
-        
-        if (!endTime || endTime.trim() === '') {
-            errors.push('End time is required');
-        } else if (!validateTimeFormat(endTime)) {
+
+        if (hasEnd && !validateTimeFormat(endTime)) {
             errors.push('Invalid end time format. Use HH:MM AM/PM (e.g., 5:00 PM)');
         }
-        
-        if (errors.length === 0 && !isStartBeforeEnd(startTime, endTime)) {
+
+        if (errors.length === 0 && hasEnd && !isStartBeforeEnd(startTime, endTime)) {
             errors.push('End time must be after start time');
         }
-        
+
         return {
             isValid: errors.length === 0,
-            errors
+            errors,
+            isOpen: !hasEnd
         };
     }
 
@@ -352,75 +385,68 @@
             red: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
         };
 
-        // Calculate preview if entries exist
         let previewHTML = '';
         if (manualEntries.length > 0) {
             const preview = processManualEntries(false);
+            const breakHTML = Number.isFinite(preview.breakSeconds)
+                ? formatDurationHTML(preview.breakSeconds)
+                : formatDurationHTML((preview.breakTime || 0) * 60);
             previewHTML = `
-                <div style="
-                    padding: 16px;
-                    background: ${gradients.green};
-                    border-radius: 12px;
-                    color: white;
-                    margin-bottom: 16px;
-                ">
-                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 6px; font-weight: 500;">Preview Total</div>
-                    <div style="font-size: 24px; font-weight: 600;">${preview.totalDuration}</div>
+                <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                    <div style="flex: 1; padding: 14px 16px; background: ${gradients.green}; border-radius: 12px; color: white;">
+                        <div style="font-size: 13px; opacity: 0.9; margin-bottom: 4px; font-weight: 500;">Preview Total</div>
+                        <div style="font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums;">${preview.totalDurationHTML || preview.totalDuration}</div>
+                    </div>
+                    <div style="flex: 1; padding: 14px 16px; background: ${gradients.pink}; border-radius: 12px; color: white;">
+                        <div style="font-size: 13px; opacity: 0.9; margin-bottom: 4px; font-weight: 500;">Break</div>
+                        <div style="font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums;">${breakHTML}</div>
+                    </div>
                 </div>
             `;
         }
 
-        // Render entry list
         let entriesListHTML = '';
         if (manualEntries.length > 0) {
-            entriesListHTML = '<div style="margin-bottom: 16px;">';
+            const punchChip = (label, time, punchIdx, isNow) => `
+                <span style="display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;padding:6px 10px;background:rgba(148,163,184,0.15);border:1px solid rgba(148,163,184,0.3);border-radius:8px;font-size:13px;font-weight:600;color:inherit;">
+                    <span style="opacity:0.6;font-size:11px;font-weight:700;letter-spacing:0.4px;flex-shrink:0;">${label}</span>
+                    ${isNow ? '<span style="background:rgba(34,197,94,0.18);color:#22c55e;padding:1px 7px;border-radius:6px;font-weight:700;">now</span>' : `<span style="white-space:nowrap;">${time}</span><button class="remove-punch-btn" data-punch="${punchIdx}" title="Remove this punch" aria-label="Remove punch" style="margin-left:auto;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:none;border-radius:50%;background:rgba(239,68,68,0.2);color:#ef4444;font-size:13px;line-height:1;cursor:pointer;">×</button>`}
+                </span>`;
+            entriesListHTML = '<div style="margin-bottom: 16px; display:flex; flex-direction:column; gap:8px;">';
+            let prevEnd = null;
             manualEntries.forEach((entry, index) => {
-                const duration = calculateDuration(entry.start, entry.end);
+                const isOpen = !entry.end;
+                const inIdx = index * 2, outIdx = index * 2 + 1;
+
+                const work = calculateDuration(entry.start, entry.end || 'MISSING');
+                const workText = `${work.hours}h ${work.minutes}m`;
+                const brk = prevEnd ? calculateDuration(prevEnd, entry.start) : null;
+                const breakText = brk ? `${brk.hours}h ${brk.minutes}m` : null;
+                const capsuleHTML = brk
+                    ? `<div class="duration-capsule dual-capsule"><div class="work-side" data-work="${workText}" title="Work: ${workText}"><span class="work-text">${workText}</span></div><div class="break-side" data-break="${breakText}" title="Break: ${breakText}"><span class="break-text">${breakText}</span></div></div>`
+                    : `<div class="duration-capsule work-only">Work: ${workText}</div>`;
                 entriesListHTML += `
                     <div style="
-                        display: flex;
-                        align-items: center;
-                        justify-content: space-between;
-                        padding: 12px 16px;
-                        background: rgba(148, 163, 184, 0.12);
+                        padding: 10px 12px;
+                        background: rgba(148, 163, 184, 0.08);
                         border: 1px solid rgba(148, 163, 184, 0.25);
                         border-radius: 10px;
-                        margin-bottom: 8px;
                     ">
-                        <div style="flex: 1;">
-                            <div style="font-size: 14px; font-weight: 600; color: inherit;">${entry.start} - ${entry.end}</div>
-                            <div style="font-size: 12px; color: inherit; opacity: 0.65;">Duration: ${duration.hours}h ${duration.minutes}m</div>
+                        <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;">
+                            ${punchChip('IN', entry.start, inIdx, false)}
+                            <span style="opacity:0.4;">→</span>
+                            ${punchChip('OUT', entry.end, outIdx, isOpen)}
                         </div>
-                        <div style="display: flex; gap: 6px;">
-                            <button class="edit-entry-btn entry-icon-btn" data-index="${index}" title="Edit" aria-label="Edit">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M12 20h9"></path>
-                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                                </svg>
-                            </button>
-                            <button class="remove-entry-btn entry-icon-btn entry-icon-btn--danger" data-index="${index}" title="Remove" aria-label="Remove">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M3 6h18"></path>
-                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-                                </svg>
-                            </button>
-                        </div>
+                        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">${capsuleHTML}${isOpen ? '<span style="font-size:11px;opacity:0.6;">· working</span>' : ''}</div>
                     </div>
                 `;
+                prevEnd = entry.end;
             });
             entriesListHTML += '</div>';
         }
 
         const manualUI = `
-            <div class="manual-entry-container" style="
-                margin: 20px;
-                padding: 20px;
-                background: rgba(148, 163, 184, 0.08);
-                border-radius: 16px;
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
-                border: 1px solid rgba(148, 163, 184, 0.25);
-            ">
+            <div class="manual-entry-container">
                 <div style="
                     text-align: center;
                     margin-bottom: 20px;
@@ -468,11 +494,11 @@
                                 width: 100%;
                                 padding: 10px 12px;
                                 border: 1px solid rgba(148, 163, 184, 0.35);
-                                background: rgba(148, 163, 184, 0.08);
+                                background: rgba(148, 163, 184, 0.14);
                                 color: inherit;
                                 border-radius: 8px;
                                 font-size: 14px;
-                                transition: border-color 0.2s;
+                                transition: border-color 0.2s, box-shadow 0.2s;
                                 box-sizing: border-box;
                             "
                         />
@@ -489,16 +515,16 @@
                         <input
                             type="text"
                             id="manual-end-time"
-                            placeholder="5:00 PM"
+                            placeholder="5:00 PM or blank"
                             style="
                                 width: 100%;
                                 padding: 10px 12px;
                                 border: 1px solid rgba(148, 163, 184, 0.35);
-                                background: rgba(148, 163, 184, 0.08);
+                                background: rgba(148, 163, 184, 0.14);
                                 color: inherit;
                                 border-radius: 8px;
                                 font-size: 14px;
-                                transition: border-color 0.2s;
+                                transition: border-color 0.2s, box-shadow 0.2s;
                                 box-sizing: border-box;
                             "
                         />
@@ -508,17 +534,35 @@
                 <button id="add-manual-entry-btn" style="
                     width: 100%;
                     padding: 12px 20px;
-                    background: ${gradients.purple};
-                    color: white;
-                    border: none;
+                    background: ${manualEntries.length > 0 ? 'transparent' : gradients.purple};
+                    color: ${manualEntries.length > 0 ? 'inherit' : 'white'};
+                    border: ${manualEntries.length > 0 ? '1px solid rgba(148, 163, 184, 0.4)' : 'none'};
                     border-radius: 10px;
                     font-size: 14px;
                     font-weight: 600;
                     cursor: pointer;
-                    transition: all 0.3s ease;
-                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    transition: all 0.2s ease;
+                    box-shadow: ${manualEntries.length > 0 ? 'none' : '0 4px 6px rgba(0, 0, 0, 0.1)'};
                     margin-bottom: 12px;
-                ">➕ Add Entry</button>
+                ">➕ Add In + Out pair</button>
+
+                ${manualEntries.length > 0 ? `
+                <div style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;opacity:0.5;font-size:11px;">
+                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
+                    or fix one punch
+                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:16px;">
+                    <input
+                        type="text"
+                        id="manual-insert-time"
+                        placeholder="e.g. 1:30 PM"
+                        style="width:100%;padding:10px 12px;border:1px solid rgba(148,163,184,0.35);background:rgba(148,163,184,0.14);color:inherit;border-radius:8px;font-size:14px;box-sizing:border-box;transition:border-color 0.2s, box-shadow 0.2s;"
+                    />
+                    <button id="insert-punch-btn" style="padding:10px 16px;background:transparent;color:#3b82f6;border:1px solid rgba(59,130,246,0.5);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all 0.2s ease;">↳ Insert punch</button>
+                </div>
+                ` : ''}
 
                 ${manualEntries.length > 0 ? `
                     <button id="calculate-manual-btn" style="
@@ -552,33 +596,18 @@
                 ">${manualEntries.length > 0 ? '← Back to Results' : '← Cancel'}</button>
 
                 <style>
-                    .entry-icon-btn {
-                        width: 28px;
-                        height: 28px;
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        background: transparent;
-                        color: inherit;
-                        opacity: 0.65;
-                        border: 1px solid rgba(148, 163, 184, 0.35);
-                        border-radius: 6px;
-                        cursor: pointer;
-                        transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
-                        padding: 0;
+                    #manual-start-time:focus, #manual-end-time:focus, #manual-insert-time:focus {
+                        outline: none;
+                        border-color: #a78bfa;
+                        box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.25);
                     }
-                    .entry-icon-btn:hover {
-                        opacity: 1;
-                        border-color: rgba(148, 163, 184, 0.6);
-                    }
-                    .entry-icon-btn:active {
-                        transform: scale(0.94);
-                    }
-                    .entry-icon-btn--danger:hover {
-                        color: #ef4444;
-                        border-color: rgba(239, 68, 68, 0.6);
-                        opacity: 1;
-                    }
+                    .remove-punch-btn { transition: background 0.15s ease, transform 0.1s ease; }
+                    .remove-punch-btn:hover { background: rgba(239, 68, 68, 0.32) !important; color: #fff !important; }
+                    .remove-punch-btn:focus-visible { outline: 2px solid #ef4444; outline-offset: 1px; }
+                    .remove-punch-btn:active { transform: scale(0.9); }
+                    #add-manual-entry-btn:hover, #insert-punch-btn:hover { filter: brightness(1.05); border-color: rgba(148, 163, 184, 0.6); }
+                    .manual-entry-container .dur-u { font-size: 0.62em; font-weight: 500; opacity: 0.78; margin-left: 1px; }
+                    .manual-entry-container .dur-s { font-size: 0.7em; font-weight: 500; opacity: 0.78; margin-left: 8px; letter-spacing: 0.3px; }
                     .uv-signature {
                         position: relative;
                         overflow: visible;
@@ -703,18 +732,33 @@
                     return;
                 }
 
-                const normalizedStart = normalizeTimeFormat(startTime);
-                const normalizedEnd = normalizeTimeFormat(endTime);
-
-                manualEntries.push({
-                    start: normalizedStart,
-                    end: normalizedEnd
-                });
+                const punches = flattenPunches();
+                punches.push(normalizeTimeFormat(startTime));
+                if (endTime) punches.push(normalizeTimeFormat(endTime));
+                repairFromPunches(punches);
 
                 startInput.value = '';
                 endInput.value = '';
                 updateUI(container);
             });
+        }
+
+        const insertBtn = document.getElementById('insert-punch-btn');
+        const insertInput = document.getElementById('manual-insert-time');
+        if (insertBtn && insertInput) {
+            const doInsert = () => {
+                clearError();
+                const t = insertInput.value.trim();
+                if (!validateTimeFormat(t)) {
+                    showError('Invalid time format. Use HH:MM AM/PM (e.g., 1:30 PM)');
+                    return;
+                }
+                insertPunch(t);
+                insertInput.value = '';
+                updateUI(container);
+            };
+            insertBtn.addEventListener('click', doInsert);
+            insertInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doInsert(); });
         }
 
         if (calculateBtn) {
@@ -733,32 +777,19 @@
                 showManualForm = false;
                 manualEntries = [];
                 prefillInputs = null;
+                if (manualTickInterval) { clearInterval(manualTickInterval); manualTickInterval = null; }
                 updateUI(container);
             });
         }
 
-        // Handle remove entry buttons
-        document.querySelectorAll('.remove-entry-btn').forEach(btn => {
+        document.querySelectorAll('.remove-punch-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const index = parseInt(e.currentTarget.getAttribute('data-index'));
-                manualEntries.splice(index, 1);
+                const idx = parseInt(e.currentTarget.getAttribute('data-punch'));
+                removePunchAt(idx);
                 updateUI(container);
             });
         });
 
-        // Handle edit entry buttons: pop the entry into the inputs for adjustment.
-        document.querySelectorAll('.edit-entry-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const index = parseInt(e.currentTarget.getAttribute('data-index'));
-                const entry = manualEntries[index];
-                if (!entry) return;
-                prefillInputs = { start: entry.start, end: entry.end };
-                manualEntries.splice(index, 1);
-                updateUI(container);
-            });
-        });
-
-        // Add hover effects
         if (addBtn) {
             addBtn.addEventListener('mouseenter', () => {
                 addBtn.style.transform = 'translateY(-2px)';
@@ -797,24 +828,21 @@
         if (!container) return null;
 
         const timeRows = container.querySelectorAll('.ng-untouched.ng-pristine.ng-valid');
-        
-        // Check if in manual mode and use manual entries
+
         if (isManualMode && manualEntries.length > 0) {
             return processManualEntries(renderOnUI);
         }
-        
-        // Filter to only actual time entry rows (must contain time elements)
+
         const validTimeRows = Array.from(timeRows).filter(row => {
             const hasStartTime = row.querySelector('.d-flex.align-items-center .w-120.mr-20 .text-small');
             const hasEndTime = row.querySelector('.d-flex.align-items-center .w-120:not(.mr-20) .text-small');
             return hasStartTime || hasEndTime;
         });
-        
-        // Detect empty logs state
+
         if (validTimeRows.length === 0) {
             return { isEmpty: true, totalDuration: 'N/A', firstStartTime: null, totalHours: 0, breakTime: 0 };
         }
-        
+
         let totalMinutes = 0;
         let firstStartTime = null;
         let breakTime = 0;
@@ -842,16 +870,16 @@
             if (renderOnUI && !row.querySelector('.duration-info')) {
                 const durationInfoElement = document.createElement('div');
                 durationInfoElement.className = 'duration-info';
-                
+
                 const workText = `${duration.hours}h ${duration.minutes}m`;
                 const breakText = brekduration ? `${brekduration.hours}h ${brekduration.minutes}m` : null;
-                
+
                 if (brekduration && index !== 0) {
                     durationInfoElement.innerHTML = `<div class="duration-capsule dual-capsule"><div class="work-side" data-work="${workText}" title="Work: ${workText}"><span class="work-text">${workText}</span></div><div class="break-side" data-break="${breakText}" title="Break: ${breakText}"><span class="break-text">${breakText}</span></div></div>`;
                 } else {
                     durationInfoElement.innerHTML = `<div class="duration-capsule work-only">Work: ${workText}</div>`;
                 }
-                
+
                 row.appendChild(durationInfoElement);
             }
         });
@@ -892,11 +920,7 @@
     }
 
     function calculateTargetCompletion(firstStartTime, totalWorkedHours, totalBreakTime, opts) {
-        // opts: { firstStartDate?: Date, breakMs?: number, totalWorkSeconds?: number }
-        // - firstStartDate / breakMs feed the completion-time math at second precision.
-        // - totalWorkSeconds is the precise (API + live) total effective work seconds;
-        //   used for the (Completed ✓) flag and the overtime card so DOM minute-rounding
-        //   never flips the flag before the user has actually hit the target.
+
         if (!firstStartTime) return { completionTime: 'N/A', overtime: 'N/A' };
 
         const hasPreciseInputs = !!(opts && (opts.firstStartDate instanceof Date || Number.isFinite(opts.breakMs)));
@@ -923,7 +947,7 @@
         const rawCompletionMs = startDate.getTime() + (targetMinutes * 60 * 1000) + breakMs;
         const completionDate = hasPreciseInputs
             ? new Date(rawCompletionMs)
-            : new Date(Math.ceil(rawCompletionMs / 60000) * 60000); // ceil only when we lack seconds
+            : new Date(Math.ceil(rawCompletionMs / 60000) * 60000);
         let completionTime = completionDate.toLocaleTimeString('en-IN', hasPreciseInputs ? {
             hour: '2-digit',
             minute: '2-digit',
@@ -963,17 +987,14 @@
     }
 
     function calculateRemainingTime(startTimeStr, breakTimeMinutes, opts) {
-        // opts.totalWorkSeconds — when supplied, drives `remaining`, `completed`,
-        // and `overtime` at second precision (sourced from API pairs + live open
-        // punch). Without it, fall back to the legacy DOM-minute math.
+
         const targetMinutes = getTargetHours();
         const targetSeconds = targetMinutes * 60;
 
         if (opts && Number.isFinite(opts.totalWorkSeconds)) {
             const effectiveSec = opts.totalWorkSeconds;
             const remainingSec = targetSeconds - effectiveSec;
-            // `remaining` is displayed in minutes — round to nearest so the
-            // 10-min alert fires near actual T-10 instead of drifting +/-30s.
+
             const remainingMin = Math.round(remainingSec / 60);
             return {
                 remaining: Math.max(0, remainingMin),
@@ -1006,7 +1027,7 @@
     function shouldNotify(remaining) {
         const hours = Math.floor(remaining / 60);
         const minutes = remaining % 60;
-        // 10-minute mark is handled by a dedicated wrap-up alert; intentionally excluded here.
+
         return (hours >= 2 && hours <= 8 && minutes === 0) ||
                (hours === 0 && [60, 50, 40, 30, 20, 15, 5, 0].includes(minutes));
     }
@@ -1014,14 +1035,14 @@
     function shouldNotifyOvertime(overtimeMinutes) {
         const hours = Math.floor(overtimeMinutes / 60);
         const minutes = overtimeMinutes % 60;
-        return (hours >= 1 && hours <= 5 && minutes === 0) || 
+        return (hours >= 1 && hours <= 5 && minutes === 0) ||
                (hours === 0 && [5, 10, 15, 20, 25, 30].includes(minutes));
     }
 
     function startBackgroundNotifications() {
         if (notificationInterval) clearInterval(notificationInterval);
-        if (renderInterval) clearInterval(renderInterval);   // avoid leaking a prior 1s timer on re-open
-        if (isViewingOtherEmployee()) return;   // read-only inspection: no personal alerts/live tick
+        if (renderInterval) clearInterval(renderInterval);
+        if (isViewingOtherEmployee()) return;
 
         const container = document.querySelector('.modal-body form div[formarrayname="logs"]');
         if (!container) return;
@@ -1034,8 +1055,7 @@
         totalBreakTimeMinutes = results ? results.breakTime : 0;
 
         notificationInterval = setInterval(() => {
-            // Recompute totalWorkSeconds live from the stashed pairs + open-in.
-            // Falls back to DOM-minute math if API data hasn't loaded yet.
+
             let liveWorkSec = null;
             if (notifierPairs && notifierPairs.length) {
                 liveWorkSec = 0;
@@ -1073,8 +1093,7 @@
             } else if (remainingTime.completed && remainingTime.remaining === 0) {
                 showNotification(`Congratulations! You've completed your ${isHalfDayMode ? 4 : 8}-hour workday! 🎉`);
             }
-            // Re-arm the 10-min alert and the banner when the window moves out
-            // (manual edit, half-day toggle, etc.).
+
             if (remainingTime.remaining > 10 || remainingTime.completed) {
                 tenMinAlertFired = false;
                 bannerDismissed = false;
@@ -1082,14 +1101,6 @@
             updateUI(container);
         }, NOTIFICATION_INTERVAL * 60 * 1000);
 
-        // Live ticking: re-render the overlay every second so the second-precision
-        // numbers (Total Duration / completion / remaining) actually move in real
-        // time instead of only refreshing on the 1-minute notification cadence.
-        // Guards:
-        //   - only while a punch is open (notifierOpenInMs != null); a closed day's
-        //     totals are static, so there's nothing to tick.
-        //   - skip while the manual-entry form is showing, since updateUI rebuilds
-        //     the overlay markup and would steal focus from what the user is typing.
         renderInterval = setInterval(() => {
             if (!modalOpen || showManualForm || notifierOpenInMs == null) return;
             updateUI(container);
@@ -1104,6 +1115,10 @@
         if (renderInterval) {
             clearInterval(renderInterval);
             renderInterval = null;
+        }
+        if (manualTickInterval) {
+            clearInterval(manualTickInterval);
+            manualTickInterval = null;
         }
         lastStartTime = null;
         totalBreakTimeMinutes = 0;
@@ -1172,19 +1187,12 @@
         }
     }
 
-    // True when the page is showing a specific employee's attendance via the
-    // manager/admin route (e.g. "#/employee/000000/time/attendance/logs").
-    // The token owner's own attendance uses the personal "/me/..." route, which
-    // has no "/employee/{id}/" segment, so this returns false for them. When
-    // viewing someone else we skip the (token-scoped) API entirely and let the
-    // DOM-only math — which reads the viewed employee's own modal rows — drive
-    // every stat, so we never show the viewer's data on a colleague's page.
     function isViewingOtherEmployee() {
         return /\/employee\/\d+\//.test(location.hash || '');
     }
 
     async function loadDayAttendance() {
-        if (isViewingOtherEmployee()) return null;   // other employee → DOM-only math
+        if (isViewingOtherEmployee()) return null;
         const info = getSelectedDateInfo();
         if (!info) return null;
         const days = await fetchMonthAttendance(info.monthKey);
@@ -1196,7 +1204,7 @@
         try {
             const info = getSelectedDateInfo();
             if (!info) {
-                // Last-ditch: scan any attendance row marked LEAVE while a modal is open.
+
                 const allRows = document.querySelectorAll('.on-hover, .attendance-log-row, [class*="border-bottom"]');
                 for (const row of allRows) {
                     const rowText = row.textContent || '';
@@ -1208,37 +1216,34 @@
                 return false;
             }
             const { day, monthName: month } = info;
-            
-            // Check all possible attendance row selectors
+
             const rowSelectors = [
                 '.on-hover',
                 '.attendance-log-row',
                 '[class*="border-bottom"]',
                 '.d-flex.align-items-center.px-16.py-12'
             ];
-            
+
             for (const selector of rowSelectors) {
                 const rows = document.querySelectorAll(selector);
-                
+
                 for (const row of rows) {
                     const rowText = row.textContent || '';
-                    
-                    // Check if this row matches our date
+
                     const hasMonth = rowText.includes(month);
                     const hasDay = rowText.includes(day) || rowText.includes(parseInt(day).toString());
-                    
+
                     if (hasMonth && hasDay) {
-                        
-                        // Check for LEAVE keyword
+
                         if (rowText.includes('LEAVE') || rowText.includes('Leave')) {
                             return true;
                         }
                     }
                 }
             }
-            
+
             return false;
-            
+
         } catch (error) {
             console.error('Error in detectHalfDayMode:', error);
             return false;
@@ -1260,19 +1265,6 @@
             return;
         }
 
-        // Override DOM-derived totals with API-precise values when available.
-        // DOM only exposes HH:MM (no seconds), so cumulative truncation can
-        // shift work/break by ~1 min and (more critically) make the displayed
-        // "out time" earlier than the real 8h-completion second.
-        //
-        // Layered override:
-        //   1) When the day has an open punch, the API doesn't count the live
-        //      working interval — DOM math correctly extends it to "now". So
-        //      we keep results.totalHours/breakTime/totalDuration as-is.
-        //   2) Regardless of open-punch state, we always attach second-precise
-        //      `firstStartDate` + `breakMs` (from validInOutPairs) so that the
-        //      completion-time calc can show seconds and be exact.
-        //   3) Manual mode keeps DOM math entirely (user is editing locally).
         const hasOpenPunch =
             (dayApiData && dayApiData.isInMissing) ||
             Array.from(container.querySelectorAll('.d-flex.align-items-center .w-120:not(.mr-20) .text-small'))
@@ -1287,18 +1279,13 @@
                 results.firstStartTime = `${hh}:${mm} ${ap}`;
                 results.firstStartDate = t;
             }
-            // Exact break milliseconds across completed pairs (closed gaps).
+
             const pairs = dayApiData.validInOutPairs || [];
             let breakMs = 0;
             for (let i = 1; i < pairs.length; i++) {
                 breakMs += new Date(pairs[i].inTime) - new Date(pairs[i - 1].outTime);
             }
-            // When currently clocked in (open punch), find the open-in moment so
-            // we can: (a) add the most-recent-break gap to breakMs when there's
-            // at least one closed pair preceding it, and (b) include live work
-            // seconds (now − openIn) in totalWorkSec. Detection runs regardless
-            // of pairs.length — a fresh day with only an open punch (and no
-            // closed pairs yet) still needs the live work counted.
+
             let openInMs = null;
             if (hasOpenPunch) {
                 if (dayApiData.isInMissing && dayApiData.lastLogOfTheDay) {
@@ -1308,14 +1295,14 @@
                     for (let i = entries.length - 1; i >= 0; i--) {
                         const e = entries[i];
                         if (!e || e.punchStatus !== 0) continue;
-                        // Skip entries that are already matched by a later "out".
+
                         const paired = entries.slice(i + 1).some(x => x && x.punchStatus === 1);
                         if (paired) continue;
                         openInMs = new Date(e.timestamp).getTime();
                         break;
                     }
                 }
-                // DOM fallback (HH:MM only): the row with end="MISSING".
+
                 if (openInMs == null) {
                     const missingRow = Array.from(container.querySelectorAll('.ng-untouched.ng-pristine.ng-valid'))
                         .find(row => {
@@ -1333,9 +1320,7 @@
                         }
                     }
                 }
-                // Only add the openIn-gap to breakMs when there's a preceding
-                // closed pair to measure from. When pairs is empty (e.g., fresh
-                // day with just the first in-punch), there's no break to add.
+
                 if (openInMs != null && pairs.length > 0) {
                     const lastClosedOutMs = new Date(pairs[pairs.length - 1].outTime).getTime();
                     if (openInMs > lastClosedOutMs) {
@@ -1346,9 +1331,7 @@
             if (pairs.length > 0 || (hasOpenPunch && openInMs != null)) {
                 results.breakMs = breakMs;
             }
-            // Precise total effective work seconds: closed pairs + (live open punch).
-            // Used for (Completed ✓) and overtime, so DOM minute-rounding can never
-            // flip the flag before the user has actually hit the target.
+
             let totalWorkSec = 0;
             for (const p of pairs) {
                 totalWorkSec += (new Date(p.outTime).getTime() - new Date(p.inTime).getTime()) / 1000;
@@ -1360,39 +1343,39 @@
                 results.totalWorkSeconds = totalWorkSec;
                 results.apiOpenInMs = openInMs;
                 results.apiPairs = pairs;
-                // Stash for the background notifier — it recomputes totalWorkSec
-                // each tick using Date.now() so its `completed` / `remaining` are
-                // second-precise too.
+
                 notifierPairs = pairs;
                 notifierOpenInMs = openInMs;
             }
-            // Closed-day work totals come from the API; keep live DOM-extended
-            // totals when the day's still in progress (Total Duration below is
-            // re-derived from totalWorkSeconds either way).
+
             if (!hasOpenPunch) {
                 const totalEffMins = Math.round((dayApiData.totalEffectiveHours || 0) * 60);
                 results.totalHours = totalEffMins / 60;
                 results.totalDuration = formatDuration(Math.floor(totalEffMins / 60), totalEffMins % 60);
             }
-            // Break is always API-sourced and second-precise — from the gaps
-            // between validInOutPairs (breakMs), including the in-progress case
-            // where breakMs already covers the gap up to the current open-in.
+
             if (Number.isFinite(results.breakMs)) {
                 results.breakSeconds = Math.floor(results.breakMs / 1000);
                 results.breakTime = Math.round(results.breakMs / 60000);
             }
-            // Override the displayed Total Duration with second precision whenever
-            // we have a precise totalWorkSeconds (closed pairs + live open punch).
-            // Sourced from validInOutPairs so it agrees with Keka to the second.
-            //   - totalDuration       → plain text ("8h 1m 33s") for title/copy
-            //   - totalDurationHTML   → styled markup with subdued seconds for the card
+
             if (Number.isFinite(results.totalWorkSeconds)) {
                 results.totalDuration = formatDurationSec(results.totalWorkSeconds);
                 results.totalDurationHTML = formatDurationHTML(results.totalWorkSeconds);
             }
         }
 
-        // If logs are empty and NOT in manual mode, show empty state
+        if (isManualMode && !showManualForm && Number.isFinite(results.manualOpenStartMs)) {
+            if (!manualTickInterval) {
+                manualTickInterval = setInterval(() => {
+                    if (modalOpen && isManualMode && !showManualForm) updateUI(container);
+                }, 1000);
+            }
+        } else if (manualTickInterval) {
+            clearInterval(manualTickInterval);
+            manualTickInterval = null;
+        }
+
         if (results.isEmpty && !isManualMode) {
             let totalDisplay = container.querySelector('.total-duration-display');
             if (!totalDisplay) {
@@ -1463,7 +1446,8 @@
                     isManualMode = true;
                     showManualForm = true;
                     manualEntries = pairs;
-                    prefillInputs = openStart ? { start: openStart, end: '' } : null;
+                    if (openStart) { const p = flattenPunches(); p.push(openStart); repairFromPunches(p); }
+                    prefillInputs = null;
                     updateUI(container);
                 });
             }
@@ -1471,7 +1455,6 @@
             return;
         }
 
-        // If in manual mode, show manual entry UI
         if (isManualMode && showManualForm) {
             let totalDisplay = container.querySelector('.total-duration-display');
             if (!totalDisplay) {
@@ -1479,6 +1462,17 @@
                 totalDisplay.className = 'total-duration-display';
                 container.appendChild(totalDisplay);
             }
+
+            totalDisplay.style.cssText = `
+                margin: 20px;
+                padding: 20px;
+                background: rgba(148, 163, 184, 0.08);
+                border-radius: 16px;
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+                border: 1px solid rgba(148, 163, 184, 0.25);
+                transition: all 0.3s ease;
+                position: relative;
+            `;
             totalDisplay.innerHTML = renderManualEntryUI(container);
             attachManualEntryHandlers(container);
             isUpdating = false;
@@ -1503,11 +1497,9 @@
             results.breakTime,
             Number.isFinite(results.totalWorkSeconds) ? { totalWorkSeconds: results.totalWorkSeconds } : undefined
         );
-        // Remaining shares the compact h/m/s markup with the other cards. When
-        // the target's met we show a short "done" label instead of a duration
-        // (the green gradient + 🎉 spark already signal completion).
-        let remainingTimeStr;   // HTML for the card
-        let remainingTimeText;  // plain text for clipboard
+
+        let remainingTimeStr;
+        let remainingTimeText;
         if (!remainingTime) {
             remainingTimeStr = remainingTimeText = 'N/A';
         } else if (remainingTime.completed) {
@@ -1523,7 +1515,6 @@
 
         document.title = `${results.totalDuration}`;
 
-        // Define gradient backgrounds
         const gradients = {
             purple: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
             blue: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
@@ -1595,10 +1586,6 @@
             position: relative;
         `;
 
-        // Insert or update day mode toggle.
-        // Keka redesigned the modal: the date is no longer an <input>; it's plain text inside
-        // <kk-text-styles label="Selected date"> within a flex row at the top of .modal-body.
-        // Anchor to that row when present; fall back to legacy .modal-body .form-group for older tenants.
         const selectedDateNode = document.querySelector('.modal-body kk-text-styles[label="Selected date"]');
         const dateHeaderRow = selectedDateNode ? selectedDateNode.parentElement : null;
         const legacyFormGroup = document.querySelector('.modal-body .form-group');
@@ -1670,7 +1657,6 @@
                     overflow: hidden;
                     cursor: pointer;
                 }
-                /* Remaining Time isn't copyable — don't promise interactivity. */
                 .remaining-time-card {
                     cursor: default;
                 }
@@ -1701,20 +1687,15 @@
                     font-size: 18px;
                     font-weight: 600;
                     letter-spacing: 0.5px;
-                    /* inherit Keka's font; tabular figures only so the live-ticking
-                       seconds don't shift the value's width as they change. */
                     font-variant-numeric: tabular-nums;
                     font-feature-settings: 'tnum' 1;
                 }
-                /* unit letters (h/m/s) — smaller and slightly faded so the
-                   numbers lead, matching the subdued-seconds treatment. */
                 .metric-value .dur-u {
                     font-size: 0.62em;
                     font-weight: 500;
                     opacity: 0.78;
                     margin-left: 1px;
                 }
-                /* trailing seconds — quiet suffix */
                 .metric-value .dur-s {
                     font-size: 0.7em;
                     font-weight: 500;
@@ -1932,7 +1913,6 @@
             </div>
         `;
 
-        // Remove old event listeners by cloning the element (if it already existed)
         const oldTotalDisplay = totalDisplay;
         const newTotalDisplay = totalDisplay.cloneNode(false);
         newTotalDisplay.innerHTML = totalDisplay.innerHTML;
@@ -1941,18 +1921,18 @@
             totalDisplay = newTotalDisplay;
         }
 
-        totalDisplay.addEventListener('copyDuration', () => 
+        totalDisplay.addEventListener('copyDuration', () =>
             copyToClipboard(formatCopyText('⏱️', 'Total Duration', results.totalDuration)));
-        
-        totalDisplay.addEventListener('copyCompletion', () => 
+
+        totalDisplay.addEventListener('copyCompletion', () =>
             copyToClipboard(formatCopyText('🎯', `${targetHoursLabel} Completion`, completionTime)));
-        
-        totalDisplay.addEventListener('copyOvertime', () => 
+
+        totalDisplay.addEventListener('copyOvertime', () =>
             copyToClipboard(formatCopyText('⭐', 'Overtime', overtime)));
-        
+
         totalDisplay.addEventListener('copyRemaining', () =>
             copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeText)));
-            
+
         totalDisplay.addEventListener('copyBreakTime', () =>
             copyToClipboard(formatCopyText('☕', 'Total Break Duration', Number.isFinite(results.breakSeconds) ? formatDurationSec(results.breakSeconds) : `${Math.floor(results.breakTime / 60)}h ${results.breakTime % 60}m`)));
 
@@ -1984,7 +1964,8 @@
             isManualMode = true;
             showManualForm = true;
             manualEntries = pairs;
-            prefillInputs = openStart ? { start: openStart, end: '' } : null;
+            if (openStart) { const p = flattenPunches(); p.push(openStart); repairFromPunches(p); }
+            prefillInputs = null;
             updateUI(container);
         });
 
@@ -1993,17 +1974,12 @@
             uvSignature.addEventListener('click', handleUVClick);
         }
 
-        // Manual entry button hover is handled by CSS
-
         } finally {
-            // ALWAYS clear the flag, even if any of the above threw. A stuck
-            // `isUpdating` used to jam the observer permanently (modal reopen /
-            // post-notification reopen silently doing nothing until page reload).
+
             isUpdating = false;
         }
     }, 250);
 
-    // Add styles for duration capsules
     const style = document.createElement('style');
     style.textContent = `
         .duration-capsule { display: inline-flex; border-radius: 20px; margin-left: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -2020,18 +1996,10 @@
     `;
     document.head.appendChild(style);
 
-    // Initialize observer
     const observer = new MutationObserver(() => {
-        // No isUpdating guard here on purpose: the open/close logic below only
-        // fires on a container-presence *transition* (gated by `modalOpen`), so
-        // updateUI's own DOM writes never re-enter it. A previous `isUpdating`
-        // guard let an in-flight render swallow the modal-close mutation, leaving
-        // `modalOpen` stuck true so the next open silently did nothing.
 
-        // Check for both possible containers: logs (with entries) or premises (without entries)
         let container = document.querySelector('.modal-body form div[formarrayname="logs"]');
-        
-        // If logs container doesn't exist, check for premises container (no entries case)
+
         if (!container) {
             const premisesContainer = document.querySelector('.modal-body form div[formarrayname="premises"]');
             if (premisesContainer) {
@@ -2078,12 +2046,8 @@
         }
     });
 
-    // One-time "it loaded" confirmation. The main overlay only appears once a
-    // Regularize modal is opened, so a fresh bookmarklet click otherwise looks
-    // like nothing happened. This reassures the user it's active. Styling mirrors
-    // the signature tooltip (purple→indigo gradient, 8px radius, 12px/600 text).
     function showActivationToast() {
-        if (document.getElementById('uv-activation-toast')) return; // avoid dupes on re-click
+        if (document.getElementById('uv-activation-toast')) return;
         const toast = document.createElement('div');
         toast.id = 'uv-activation-toast';
         toast.textContent = '✅  Keka helper active. Open any day to see your duration';
@@ -2108,13 +2072,11 @@
         `;
         document.body.appendChild(toast);
 
-        // Fade + slide down from the top on next frame so the transition runs.
         requestAnimationFrame(() => {
             toast.style.opacity = '1';
             toast.style.transform = 'translateX(-50%) translateY(0)';
         });
 
-        // Fade out (back up toward the top), then remove from the DOM.
         setTimeout(() => {
             toast.style.opacity = '0';
             toast.style.transform = 'translateX(-50%) translateY(-14px)';
@@ -2122,11 +2084,6 @@
         }, 2600);
     }
 
-    // Start observing + show the toast once the DOM is ready. If the bookmarklet is
-    // clicked while the page is still loading, document.body may not exist yet —
-    // calling observer.observe(null) or appending the toast would throw. Defer to
-    // DOMContentLoaded in that case so an early click still works (and still shows
-    // the confirmation toast) instead of silently failing.
     function startKekaEnhance() {
         observer.observe(document.body, { childList: true, subtree: true });
         showActivationToast();
