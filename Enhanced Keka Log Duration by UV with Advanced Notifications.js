@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      20.4
+// @version      20.5
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -33,6 +33,7 @@
     window.__kekaEnhanceLoaded = true;
 
     let modalOpen = false;
+    let originalTitle = null;
     let lastStartTime = null;
     let notificationInterval = null;
     let renderInterval = null;
@@ -57,7 +58,7 @@
     let notifierPairs = [];
     let notifierOpenInMs = null;
 
-    const SCRIPT_VERSION = '20.4';
+    const SCRIPT_VERSION = '20.5';
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1;
@@ -1513,7 +1514,7 @@
         }
         const targetHoursLabel = isHalfDayMode ? '4hr' : '8hr';
 
-        document.title = `${results.totalDuration}`;
+        if (modalOpen) document.title = `${results.totalDuration}`;
 
         const gradients = {
             purple: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
@@ -2009,6 +2010,7 @@
 
         if (container && !modalOpen) {
             modalOpen = true;
+            originalTitle = document.title;
             isHalfDayMode = false;
             isHalfDayAutoDetected = false;
             dayApiData = null;
@@ -2032,6 +2034,7 @@
             startBackgroundNotifications();
         } else if (!container && modalOpen) {
             modalOpen = false;
+            if (originalTitle !== null) { document.title = originalTitle; originalTitle = null; }
             isHalfDayMode = false;
             isHalfDayAutoDetected = false;
             isManualMode = false;
