@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      20.5
+// @version      20.6
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -34,6 +34,7 @@
 
     let modalOpen = false;
     let originalTitle = null;
+    let plannedBreakMin = 0;
     let lastStartTime = null;
     let notificationInterval = null;
     let renderInterval = null;
@@ -58,7 +59,7 @@
     let notifierPairs = [];
     let notifierOpenInMs = null;
 
-    const SCRIPT_VERSION = '20.5';
+    const SCRIPT_VERSION = '20.6';
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1;
@@ -392,7 +393,36 @@
             const breakHTML = Number.isFinite(preview.breakSeconds)
                 ? formatDurationHTML(preview.breakSeconds)
                 : formatDurationHTML((preview.breakTime || 0) * 60);
+            // Projected leave time for these entries, plus an adjustable extra
+            // break — belongs here because it's derived from the punches you're
+            // modelling (first punch + target + breaks so far + planned break).
+            const targetLbl = isHalfDayMode ? '4hr' : '8hr';
+            const baseBreakMs = Number.isFinite(preview.breakMs) ? preview.breakMs : (preview.breakTime || 0) * 60000;
+            const plannedOut = (calculateTargetCompletion(preview.firstStartTime, preview.totalHours, preview.breakTime, {
+                firstStartDate: preview.firstStartDate,
+                breakMs: baseBreakMs + plannedBreakMin * 60000,
+                totalWorkSeconds: preview.totalWorkSeconds,
+            }).completionTime || 'N/A').replace(' (Completed ✓)', '');
+            // Break presets as tap chips + a custom-minutes input on the
+            // "Leave by" card. Active preset is inverted; a non-preset value
+            // lives in the custom box.
+            const presets = [0, 15, 30, 45, 60];
+            const isCustomBreak = plannedBreakMin > 0 && !presets.includes(plannedBreakMin);
+            const breakChips = presets.map(m => {
+                const on = plannedBreakMin === m;
+                return `<button class="break-plan-chip" data-min="${m}" style="padding:5px 8px;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums;background:${on ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.16)'};color:${on ? '#1d4ed8' : '#fff'};">${m === 0 ? 'None' : '+' + m}</button>`;
+            }).join('');
             previewHTML = `
+                <div style="padding: 14px 16px; background: ${gradients.blue}; border-radius: 12px; color: white; margin-bottom: 12px;">
+                    <div style="font-size: 13px; opacity: 0.9; margin-bottom: 4px; font-weight: 500;">🎯 Leave by (${targetLbl})</div>
+                    <div style="font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;">${subdueSecondsHTML(plannedOut)}</div>
+                    <div style="display: flex; align-items: center; gap: 5px; margin-top: 12px; flex-wrap: nowrap;">
+                        <span style="font-size: 14px; margin-right: 1px; flex-shrink: 0;">☕</span>
+                        ${breakChips}
+                        <input id="break-plan-custom" type="number" min="0" max="480" inputmode="numeric" placeholder="min" value="${isCustomBreak ? plannedBreakMin : ''}" title="Custom minutes"
+                            style="width:48px;flex-shrink:0;padding:5px 4px;border:none;border-radius:7px;font-size:12px;font-weight:700;text-align:center;box-sizing:border-box;font-variant-numeric:tabular-nums;background:${isCustomBreak ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.16)'};color:${isCustomBreak ? '#1d4ed8' : '#fff'};">
+                    </div>
+                </div>
                 <div style="display: flex; gap: 12px; margin-bottom: 16px;">
                     <div style="flex: 1; padding: 14px 16px; background: ${gradients.green}; border-radius: 12px; color: white;">
                         <div style="font-size: 13px; opacity: 0.9; margin-bottom: 4px; font-weight: 500;">Preview Total</div>
@@ -459,6 +489,12 @@
                 </div>
 
                 ${previewHTML}
+                ${manualEntries.length > 0 ? `
+                <div style="display:flex;align-items:center;gap:8px;margin:0 0 14px;opacity:0.5;font-size:10px;font-weight:700;letter-spacing:0.6px;">
+                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
+                    PUNCHES
+                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
+                </div>` : ''}
                 ${entriesListHTML}
 
                 <div id="manual-error-message" style="
@@ -790,6 +826,23 @@
                 updateUI(container);
             });
         });
+
+        document.querySelectorAll('.break-plan-chip').forEach(chip => {
+            chip.addEventListener('click', (e) => {
+                plannedBreakMin = parseInt(e.currentTarget.getAttribute('data-min')) || 0;
+                updateUI(container);
+            });
+        });
+        const bpCustom = document.getElementById('break-plan-custom');
+        if (bpCustom) {
+            // 'change' (Enter/blur), not 'input' — the manual form doesn't auto
+            // re-render, so this keeps focus while typing and applies on commit.
+            bpCustom.addEventListener('change', () => {
+                const v = parseInt(bpCustom.value, 10);
+                plannedBreakMin = Number.isFinite(v) ? Math.min(480, Math.max(0, v)) : 0;
+                updateUI(container);
+            });
+        }
 
         if (addBtn) {
             addBtn.addEventListener('mouseenter', () => {
@@ -2011,6 +2064,7 @@
         if (container && !modalOpen) {
             modalOpen = true;
             originalTitle = document.title;
+            plannedBreakMin = 0;
             isHalfDayMode = false;
             isHalfDayAutoDetected = false;
             dayApiData = null;
