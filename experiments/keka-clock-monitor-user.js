@@ -23,7 +23,7 @@
     let isMonitoring = false;
     let lastStatus = null;
     let notificationSound = null;
-    let employeeId = localStorage.getItem(STORAGE_KEY_EMPLOYEE_ID) || '000000'; // Default employee ID
+    let employeeId = localStorage.getItem(STORAGE_KEY_EMPLOYEE_ID) || '000000'; // Default employee ID — set yours via localStorage
     let isMinimized = false;
 
     // Create UI overlay

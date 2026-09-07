@@ -1,6 +1,6 @@
-# Enhanced Keka Log Duration — design notes
+# Design notes
 
-Rationale for the non-obvious decisions in `Enhanced Keka Log Duration by UV with Advanced Notifications.js`. The code itself is kept comment-light; this file is the "why".
+Rationale for the non-obvious decisions in `keka-time-helper.user.js`. The code itself is kept comment-light; this file is the "why".
 
 ## Data sources: DOM vs API
 The overlay reads from two places:
