@@ -4,7 +4,7 @@ on:
   push:
     branches: [master]
     paths:
-      - "Enhanced Keka Log Duration by UV with Advanced Notifications.js"
+      - "keka-time-helper.user.js"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.GIST_TOKEN }}
           GIST_ID: ffc09708226db8bef988a0ecf1848518
-          SCRIPT_PATH: "Enhanced Keka Log Duration by UV with Advanced Notifications.js"
+          SCRIPT_PATH: "keka-time-helper.user.js"
         run: |
           set -euo pipefail
           if [ -z "${TOKEN:-}" ]; then
@@ -40,7 +40,7 @@ jobs:
       - name: Warm raw-Gist CDN cache & verify version
         env:
           GIST_ID: ffc09708226db8bef988a0ecf1848518
-          SCRIPT_PATH: "Enhanced Keka Log Duration by UV with Advanced Notifications.js"
+          SCRIPT_PATH: "keka-time-helper.user.js"
         run: |
           set -uo pipefail
           extract_version() {

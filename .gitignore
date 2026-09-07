@@ -1,0 +1,13 @@
+# Local tooling / editor settings
+.claude/
+CLAUDE.md
+
+# Exported chat transcripts / scratch
+*hey.txt
+*-transcript.txt
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~

@@ -2,7 +2,7 @@
   "_meta": {
     "source": "GET {origin}/k/attendance/api/mytime/attendance/summary/2026-05-01",
     "capturedAt": "2026-05-19",
-    "tenant": "your-tenant.keka.com",
+    "tenant": "<redacted>.keka.com",
     "note": "Single dailyAttendance entry (2026-05-18) captured live to lock the API shape the script depends on. Identifiers redacted. Compare against fresh fetches to detect Keka API drift.",
     "redactedKeys": ["id", "employeeId", "shiftSessionId", "premiseId"]
   },
