@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      20.6
+// @version      20.7
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -59,7 +59,7 @@
     let notifierPairs = [];
     let notifierOpenInMs = null;
 
-    const SCRIPT_VERSION = '20.6';
+    const SCRIPT_VERSION = '20.7';
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1;
@@ -70,7 +70,7 @@
 
     const NOTIFICATION_MESSAGES = [
         "Time check! {remaining} left in your workday. Keep going! 💠",
-        "Quick update: {remaining} until you hit your 8-hour mark! 🎯",
+        "Quick update: {remaining} until you hit your {target}-hour mark! 🎯",
         "Checking in - {remaining} to go. You've got this! 🌟",
         "Time flies! {remaining} remaining in your workday. Stay focused! 🚀",
         "Progress check: {remaining} left. Take a stretch if needed! 🧘‍♂️",
@@ -169,7 +169,9 @@
     function getRandomNotificationMessage(remaining) {
         const messageIndex = notificationCounter % NOTIFICATION_MESSAGES.length;
         notificationCounter++;
-        return NOTIFICATION_MESSAGES[messageIndex].replace('{remaining}', remaining);
+        return NOTIFICATION_MESSAGES[messageIndex]
+            .replace('{remaining}', remaining)
+            .replace('{target}', isHalfDayMode ? 4 : 8);
     }
 
     function parseTime(timeStr) {
