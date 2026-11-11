@@ -1,6 +1,6 @@
 # Architecture
 
-A collection of standalone, client-side JavaScript scripts that augment the Keka HR portal (`*.keka.com`) in-browser. There is no build system, package manager, or test suite — each `.js` file is self-contained and runs via Tampermonkey/Violentmonkey, a browser bookmarklet, or pasted into the DevTools console.
+A collection of standalone, client-side JavaScript scripts that augment the Keka HR portal (`*.keka.com`) in-browser. There is no build system or package manager (a dependency-free `node --test tests/` suite covers the main script) — each `.js` file is self-contained and runs via Tampermonkey/Violentmonkey, a browser bookmarklet, or pasted into the DevTools console.
 
 ## Scripts
 

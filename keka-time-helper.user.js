@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      21.1
+// @version      21.2
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -50,7 +50,7 @@
     let isManualMode = false;
     let manualEntries = [];
     let showManualForm = false;
-    let prefillInputs = null;
+    let refocusPunchInput = false;
     let dayApiData = null;
     let tenMinAlertFired = false;
     let bannerDismissed = false;
@@ -60,10 +60,18 @@
     let notifierOpenInMs = null;
     let homeCopy = {};
 
-    const SCRIPT_VERSION = '21.1';
+    const SCRIPT_VERSION = '21.2';
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1;
+    const GRADIENTS = {
+        purple: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
+        blue: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
+        green: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
+        orange: 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)',
+        completed: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
+        pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)'
+    };
 
     function getTargetHours() {
         return isHalfDayMode ? FOUR_HOURS_IN_MINUTES : EIGHT_HOURS_IN_MINUTES;
@@ -326,84 +334,89 @@
         repairFromPunches(p);
     }
 
-    function validateTimeFormat(timeStr) {
+    function parseFlexibleTime(timeStr, opts) {
+        if (typeof timeStr !== 'string') return null;
+        let s = timeStr.trim().toLowerCase().replace(/\s+/g, ' ');
+        if (!s) return null;
 
-        const timeRegex = /^(0?[1-9]|1[0-2]):([0-5][0-9])\s?(AM|PM|am|pm)$/i;
-        return timeRegex.test(timeStr.trim());
-    }
-
-    function normalizeTimeFormat(timeStr) {
-
-        const trimmed = timeStr.trim();
-        const match = trimmed.match(/^(0?[1-9]|1[0-2]):([0-5][0-9])\s?(AM|PM|am|pm)$/i);
-        if (!match) return null;
-
-        const [, hours, minutes, period] = match;
-        const paddedHours = hours.padStart(2, '0');
-        return `${paddedHours}:${minutes} ${period.toUpperCase()}`;
-    }
-
-    function isStartBeforeEnd(startTime, endTime) {
-        const start = parseTime(startTime);
-        const end = parseTime(endTime);
-
-        if (!start || !end) return false;
-
-        const startMinutes = start.hours * 60 + start.minutes;
-        const endMinutes = end.hours * 60 + end.minutes;
-
-        return startMinutes < endMinutes;
-    }
-
-    function validateManualEntry(startTime, endTime) {
-        const errors = [];
-        const hasEnd = !!(endTime && endTime.trim() !== '');
-
-        if (!startTime || startTime.trim() === '') {
-            errors.push('Start time is required');
-        } else if (!validateTimeFormat(startTime)) {
-            errors.push('Invalid start time format. Use HH:MM AM/PM (e.g., 9:00 AM)');
+        let period = null;
+        const mer = s.match(/\s?([ap])\.?\s?(?:m\.?)?$/);
+        if (mer) {
+            period = mer[1] === 'a' ? 'am' : 'pm';
+            s = s.slice(0, mer.index).trim();
         }
 
-        if (hasEnd && !validateTimeFormat(endTime)) {
-            errors.push('Invalid end time format. Use HH:MM AM/PM (e.g., 5:00 PM)');
+        let hStr, mStr;
+        let m = s.match(/^(\d{1,2})(?:[:.](\d{2})(?:[:.]\d{2})?)?$/);
+        if (m) {
+            hStr = m[1];
+            mStr = m[2] || '00';
+        } else if ((m = s.match(/^(\d{1,2})(\d{2})$/))) {
+            hStr = m[1];
+            mStr = m[2];
+        } else {
+            return null;
         }
 
-        if (errors.length === 0 && hasEnd && !isStartBeforeEnd(startTime, endTime)) {
-            errors.push('End time must be after start time');
-        }
+        let hours = parseInt(hStr, 10);
+        const minutes = parseInt(mStr, 10);
+        if (minutes > 59) return null;
 
-        return {
-            isValid: errors.length === 0,
-            errors,
-            isOpen: !hasEnd
-        };
+        if (period) {
+            if (hours < 1 || hours > 12) return null;
+            if (period === 'pm' && hours !== 12) hours += 12;
+            if (period === 'am' && hours === 12) hours = 0;
+        } else {
+            if (hours > 23) return null;
+            if (opts && opts.guessPm && hours >= 1 && hours <= 6 && hStr.length === 1) hours += 12;
+        }
+        return { hours, minutes };
+    }
+
+    function normalizeTimeFormat(timeStr, opts) {
+        const t = parseFlexibleTime(timeStr, opts);
+        if (!t) return null;
+        const h12 = (t.hours % 12) || 12;
+        return `${String(h12).padStart(2, '0')}:${String(t.minutes).padStart(2, '0')} ${t.hours < 12 ? 'AM' : 'PM'}`;
+    }
+
+    function parsePunchInput(raw) {
+        const parts = String(raw || '').split(/\s*(?:-|–|—|\bto\b)\s*/i).map(s => s.trim()).filter(Boolean);
+        if (parts.length === 0 || parts.length > 2) {
+            return { error: 'Enter a time like 1:30 PM, or a range like 9:30 AM - 1:00 PM' };
+        }
+        const times = parts.map(p => normalizeTimeFormat(p, { guessPm: true }));
+        const badIdx = times.indexOf(null);
+        if (badIdx !== -1) {
+            return { error: `Couldn't read "${parts[badIdx]}". Try 1:30 PM, 13:30 or 1330` };
+        }
+        if (times.length === 2 && punchMinutes(times[0]) >= punchMinutes(times[1])) {
+            return { error: 'End time must be after start time' };
+        }
+        return { times };
+    }
+
+    function editPunchAt(index, timeStr) {
+        const n = normalizeTimeFormat(timeStr, { guessPm: true });
+        const p = flattenPunches();
+        if (!n || index < 0 || index >= p.length) return false;
+        p[index] = n;
+        repairFromPunches(p);
+        return true;
     }
 
     function renderManualEntryUI(container) {
         const hasEntries = manualEntries.length > 0;
-        // Same palette + colour roles as the results page: purple = worked,
-        // blue = completion, pink = break.
-        const gradients = {
-            purple: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
-            blue: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
-            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)'
-        };
 
         let previewHTML = '';
         if (hasEntries) {
             const preview = processManualEntries(false);
-            // Manual punches are minute-precise, so the edit page shows h/m
-            // only — a seconds field here would always read "0s".
             const hmHTML = (sec) => {
                 const total = Math.max(0, Math.floor(sec / 60));
                 return `${Math.floor(total / 60)}<span class="dur-u">h</span> ${total % 60}<span class="dur-u">m</span>`;
             };
             const breakHTML = hmHTML(Number.isFinite(preview.breakSeconds) ? preview.breakSeconds : (preview.breakTime || 0) * 60);
             const workHTML = hmHTML(Number.isFinite(preview.totalWorkSeconds) ? preview.totalWorkSeconds : (preview.totalHours || 0) * 3600);
-            // Projected leave time for these entries, plus an adjustable extra
-            // break — belongs here because it's derived from the punches you're
-            // modelling (first punch + target + breaks so far + planned break).
             const targetLbl = isHalfDayMode ? '4hr' : '8hr';
             const baseBreakMs = Number.isFinite(preview.breakMs) ? preview.breakMs : (preview.breakTime || 0) * 60000;
             const plannedOut = (calculateTargetCompletion(preview.firstStartTime, preview.totalHours, preview.breakTime, {
@@ -412,10 +425,6 @@
                 totalWorkSeconds: preview.totalWorkSeconds,
             }).completionTime || 'N/A').replace(' (Completed ✓)', '')
                 .replace(/^0(\d)/, '$1').replace(/(\d{1,2}:\d{2}):\d{2}/, '$1');
-            // Break presets as tap chips + a custom-minutes box. Active preset
-            // gets the accent; a non-preset value lives in the custom box. The
-            // box deliberately doesn't carry .break-plan-chip — that class
-            // wires the preset click handler, which would reset it on focus.
             const presets = [0, 15, 30, 45, 60];
             const isCustomBreak = plannedBreakMin > 0 && !presets.includes(plannedBreakMin);
             const breakChips = presets.map(m =>
@@ -426,18 +435,18 @@
                 : `after ${targetLbl} of work, if you take no more breaks`;
             previewHTML = `
                 <div class="me-grid">
-                    <div class="metric-card" style="background: ${gradients.purple}">
+                    <div class="metric-card" style="background: ${GRADIENTS.purple}">
                         <div class="spark-icon">⏱️</div>
                         <div class="metric-label">Total Duration</div>
                         <div class="metric-value">${workHTML}</div>
                     </div>
-                    <div class="metric-card" style="background: ${gradients.pink}">
+                    <div class="metric-card" style="background: ${GRADIENTS.pink}">
                         <div class="spark-icon">☕</div>
                         <div class="metric-label">Break so far</div>
                         <div class="metric-value">${breakHTML}</div>
                     </div>
                 </div>
-                <div class="metric-card me-leave-card" style="background: ${gradients.blue}">
+                <div class="metric-card me-leave-card" style="background: ${GRADIENTS.blue}">
                     <div class="spark-icon">🎯</div>
                     <div class="metric-label">${targetLbl} Completion</div>
                     <div class="metric-value">${plannedOut}</div>
@@ -454,18 +463,12 @@
             `;
         }
 
-        // Punches as a flat timeline: one row per IN→OUT pair, the purple work
-        // pill sitting on the connector between the two times, and the break
-        // before that pair as a blue pill on the right (same colours as the
-        // work/break capsule on Keka's log rows). × removes that punch; it
-        // floats on the time and only shows on row hover, because the panel
-        // inside Keka's modal is ~290px wide and there's no room for it inline.
         let entriesListHTML = '';
         if (hasEntries) {
             const shortDur = d => d.hours ? `${d.hours}h ${d.minutes}m` : `${d.minutes}m`;
             const punch = (time, punchIdx) => {
                 const shown = time.replace(/^0/, '');
-                return `<span class="me-punch">${shown}<button type="button" class="remove-punch-btn" data-punch="${punchIdx}" title="Remove this punch" aria-label="Remove punch ${shown}"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 3l4 4M7 3l-4 4"></path></svg></button></span>`;
+                return `<span class="me-punch"><span class="me-time" data-punch="${punchIdx}" tabindex="0" role="button" title="Click to edit">${shown}</span><button type="button" class="remove-punch-btn" data-punch="${punchIdx}" title="Remove this punch" aria-label="Remove punch ${shown}"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 3l4 4M7 3l-4 4"></path></svg></button></span>`;
             };
             entriesListHTML = '<div class="me-list">';
             let prevEnd = null;
@@ -504,7 +507,7 @@
                     <button type="button" id="add-punch-btn" class="me-btn${hasEntries ? '' : ' me-primary'}">Add</button>
                 </div>
                 <div id="manual-error-message" class="me-error"></div>
-                <div class="me-hint">e.g. 1:30 PM, or 9:30 AM - 1:00 PM for a pair</div>
+                <div class="me-hint">e.g. 1:30 PM, 13:30, or 9:30 - 1:00 PM for a pair</div>
 
                 ${hasEntries ? '<button type="button" id="calculate-manual-btn" class="me-btn me-primary me-show-btn">Show metrics</button>' : ''}
 
@@ -544,10 +547,14 @@
                     .me-span.is-open::after { background: repeating-linear-gradient(90deg, rgba(124, 58, 237, 0.7) 0 4px, transparent 4px 8px); }
                     .me-now { color: #22c55e; font-weight: 700; }
                     .me-pill { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border-radius: 20px; color: #fff; font-size: 12px; font-weight: 500; white-space: nowrap; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
-                    .me-pill-work { background: ${gradients.purple}; }
-                    .me-pill-break { background: ${gradients.blue}; padding: 3px 8px; font-size: 11px; }
+                    .me-pill-work { background: ${GRADIENTS.purple}; }
+                    .me-pill-break { background: ${GRADIENTS.blue}; padding: 3px 8px; font-size: 11px; }
                     .me-brk-slot { display: flex; justify-content: flex-end; }
                     .remove-punch-btn { position: absolute; top: -6px; right: -4px; display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; border: none; border-radius: 50%; background: #ef4444; color: #fff; line-height: 0; cursor: pointer; opacity: 0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: opacity 0.15s ease, transform 0.1s ease; z-index: 1; }
+                    .me-time { cursor: text; border-radius: 4px; padding: 0 2px; margin: 0 -2px; transition: background 0.15s ease; }
+                    .me-time:hover, .me-time:focus-visible { background: rgba(148, 163, 184, 0.2); outline: none; }
+                    .me-time-edit { margin: 0 -5px; padding: 0 3px; border: 1px solid #8b5cf6; border-radius: 4px; background: rgba(139, 92, 246, 0.12); color: inherit; font: inherit; box-sizing: border-box; outline: none; }
+                    .me-punch.is-editing .remove-punch-btn { display: none; }
                     .remove-punch-btn svg { width: 10px; height: 10px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
                     .me-row:hover .remove-punch-btn { opacity: 0.85; }
                     .remove-punch-btn:hover { opacity: 1 !important; transform: scale(1.1); }
@@ -661,6 +668,9 @@
         const punchInput = document.getElementById('manual-punch-input');
         const errorMsg = document.getElementById('manual-error-message');
 
+        if (refocusPunchInput && punchInput) punchInput.focus();
+        refocusPunchInput = false;
+
         function showError(message) {
             errorMsg.textContent = message;
             errorMsg.style.display = 'block';
@@ -673,36 +683,20 @@
             errorMsg.style.display = 'none';
         }
 
-        // One input for both cases: a single time inserts one punch, a range
-        // ("9:30 AM - 1:00 PM", "–" or "to" also work) inserts a pair.
-        // Either way the punch list is re-paired by time.
         if (addBtn && punchInput) {
             const doAdd = () => {
                 clearError();
-                const parts = punchInput.value.split(/\s*(?:-|–|\bto\b)\s*/i).map(s => s.trim()).filter(Boolean);
-                if (parts.length === 0 || parts.length > 2) {
-                    showError('Enter a time like 1:30 PM, or a range like 9:30 AM - 1:00 PM');
+                const parsed = parsePunchInput(punchInput.value);
+                if (parsed.error) {
+                    showError(parsed.error);
                     return;
                 }
-                if (parts.length === 2) {
-                    const validation = validateManualEntry(parts[0], parts[1]);
-                    if (!validation.isValid) {
-                        showError(validation.errors.join('. '));
-                        return;
-                    }
-                } else if (!validateTimeFormat(parts[0])) {
-                    showError('Invalid time format. Use HH:MM AM/PM (e.g., 1:30 PM)');
-                    return;
-                }
-                parts.forEach(t => insertPunch(t));
+                parsed.times.forEach(t => insertPunch(t));
+                punchInput.value = '';
+                refocusPunchInput = true;
                 updateUI(container);
-                const next = document.getElementById('manual-punch-input');
-                if (next) next.focus();
             };
             addBtn.addEventListener('click', doAdd);
-            // preventDefault: this page lives inside Keka's regularization
-            // <form>, so a bare Enter would implicitly submit it — clicking the
-            // form's first submit button (Keka's "+ Add Log", or ours).
             punchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
         }
 
@@ -721,11 +715,63 @@
                 isManualMode = false;
                 showManualForm = false;
                 manualEntries = [];
-                prefillInputs = null;
                 if (manualTickInterval) { clearInterval(manualTickInterval); manualTickInterval = null; }
                 updateUI(container);
             });
         }
+
+        document.querySelectorAll('.me-time').forEach(el => {
+            const startEdit = () => {
+                if (el.dataset.editing) return;
+                el.dataset.editing = '1';
+                clearError();
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'me-time-edit';
+                input.value = el.textContent;
+                input.setAttribute('aria-label', 'Edit punch time');
+                input.style.width = `${el.getBoundingClientRect().width + 6}px`;
+                input.style.height = `${el.offsetHeight}px`;
+                el.parentElement.classList.add('is-editing');
+                el.replaceWith(input);
+                input.focus();
+                input.select();
+
+                let done = false;
+                const restore = () => {
+                    input.replaceWith(el);
+                    el.parentElement.classList.remove('is-editing');
+                    delete el.dataset.editing;
+                };
+                const finish = (mode) => {
+                    if (done) return;
+                    const raw = input.value.trim();
+                    const changed = mode !== 'cancel' && raw !== el.textContent;
+                    if (changed && editPunchAt(parseInt(el.dataset.punch, 10), raw)) {
+                        done = true;
+                        updateUI(container);
+                        return;
+                    }
+                    if (changed && mode === 'save') {
+                        showError(`Couldn't read "${raw}". Try 1:30 PM, 13:30 or 1330`);
+                        input.focus();
+                        return;
+                    }
+                    if (changed) showError(`Couldn't read "${raw}", kept the old time`);
+                    done = true;
+                    restore();
+                };
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); finish('save'); }
+                    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish('cancel'); }
+                });
+                input.addEventListener('blur', () => finish('blur'));
+            };
+            el.addEventListener('click', startEdit);
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(); }
+            });
+        });
 
         document.querySelectorAll('.remove-punch-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -743,10 +789,6 @@
         });
         const bpCustom = document.getElementById('break-plan-custom');
         if (bpCustom) {
-            // Apply on commit (Enter/blur), not 'input' — the manual form doesn't
-            // auto re-render, so this keeps focus while typing. Enter is handled
-            // here with preventDefault for the same implicit-submit reason as
-            // the punch input; 'change' still covers blur.
             const applyCustom = () => {
                 const v = parseInt(bpCustom.value, 10);
                 plannedBreakMin = Number.isFinite(v) ? Math.min(480, Math.max(0, v)) : 0;
@@ -1031,8 +1073,6 @@
                 tenMinAlertFired = false;
                 bannerDismissed = false;
             }
-            // The manual form only re-renders on user action; a timed redraw
-            // would wipe whatever is being typed into its inputs.
             if (!showManualForm) updateUI(container);
         }, NOTIFICATION_INTERVAL * 60 * 1000);
 
@@ -1062,9 +1102,17 @@
     }
 
     function copyToClipboard(text) {
-        navigator.clipboard.writeText(text).catch(err => {
+        return navigator.clipboard.writeText(text).then(() => true, err => {
             console.error('Failed to copy:', err);
+            return false;
         });
+    }
+
+    function flashCopied(card) {
+        if (!card || !card.classList) return;
+        card.classList.add('is-copied');
+        clearTimeout(card._copiedTimer);
+        card._copiedTimer = setTimeout(() => card.classList.remove('is-copied'), 1200);
     }
 
     function formatCopyText(emoji, label, value) {
@@ -1348,7 +1396,6 @@
                     showManualForm = true;
                     manualEntries = pairs;
                     if (openStart) { const p = flattenPunches(); p.push(openStart); repairFromPunches(p); }
-                    prefillInputs = null;
                     updateUI(container);
                 });
             }
@@ -1416,15 +1463,6 @@
 
         if (modalOpen) document.title = `${results.totalDuration}`;
 
-        const gradients = {
-            purple: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
-            blue: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
-            green: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
-            orange: 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)',
-            completed: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
-            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)'
-        };
-
         let totalDisplay = container.querySelector('.total-duration-display');
         if (!totalDisplay) {
             totalDisplay = document.createElement('div');
@@ -1467,10 +1505,6 @@
                 ">✕</button>
             </div>` : '';
 
-        // The results card ticks every second, but only its five values move.
-        // Rebuild the whole card only when the layout changes (completed,
-        // wrap-up banner, day mode, debug); otherwise patch the values in place
-        // so animations, hover state and listeners survive the tick.
         const breakSecs = Number.isFinite(results.breakSeconds) ? results.breakSeconds : (results.breakTime || 0) * 60;
         const valuesHTML = {
             total: results.totalDurationHTML || formatDurationHTML((results.totalHours || 0) * 3600),
@@ -1590,10 +1624,7 @@
                     overflow: hidden;
                     cursor: pointer;
                 }
-                .remaining-time-card {
-                    cursor: default;
-                }
-                .metric-card:not(.remaining-time-card):hover {
+                .metric-card:hover {
                     transform: translateY(-2px);
                 }
                 .metric-card::before {
@@ -1607,8 +1638,28 @@
                     opacity: 0;
                     transition: opacity 0.2s ease-in-out;
                 }
-                .metric-card:not(.remaining-time-card):hover::before {
+                .metric-card:hover::before {
                     opacity: 1;
+                }
+                .metric-card::after {
+                    content: 'Copied ✓';
+                    position: absolute;
+                    left: 16px;
+                    top: 16px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    opacity: 0;
+                    transition: opacity 0.2s ease;
+                    pointer-events: none;
+                }
+                .metric-card .metric-label {
+                    transition: opacity 0.2s ease;
+                }
+                .metric-card.is-copied::after {
+                    opacity: 1;
+                }
+                .metric-card.is-copied .metric-label {
+                    opacity: 0;
                 }
                 .metric-label {
                     font-size: 14px;
@@ -1739,29 +1790,29 @@
             </button>
             ${wrapupBannerHTML}
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
-                <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
+                <div class="metric-card" style="background: ${GRADIENTS.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
                     <div class="spark-icon">⏱️</div>
                     <div class="metric-label">Total Duration</div>
                     <div class="metric-value" data-k="total">${valuesHTML.total}</div>
                 </div>
-                <div class="metric-card" style="background: ${gradients.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
+                <div class="metric-card" style="background: ${GRADIENTS.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
                     <div class="spark-icon">🎯</div>
                     <div class="metric-label">${targetHoursLabel} Completion</div>
                     <div class="metric-value" data-k="completion">${valuesHTML.completion}</div>
                 </div>
-                <div class="metric-card" style="background: ${gradients.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
+                <div class="metric-card" style="background: ${GRADIENTS.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
                     <div class="spark-icon">⭐</div>
                     <div class="metric-label">Overtime</div>
                     <div class="metric-value" data-k="overtime">${valuesHTML.overtime}</div>
                 </div>
-                <div class="metric-card remaining-time-card" style="background: ${isCompleted ? gradients.completed : gradients.green}">
+                <div class="metric-card remaining-time-card" style="background: ${isCompleted ? GRADIENTS.completed : GRADIENTS.green}" onclick="this.dispatchEvent(new CustomEvent('copyRemaining', {bubbles: true}))">
                     <div class="spark-icon">${isCompleted ? '🎉' : '⌛'}</div>
                     <div class="metric-label">Remaining Time</div>
                     <div class="metric-value" data-k="remaining">${valuesHTML.remaining}</div>
                 </div>
             </div>
             <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
-                <div class="metric-card" style="background: ${gradients.pink}" onclick="this.dispatchEvent(new CustomEvent('copyBreakTime', {bubbles: true}))">
+                <div class="metric-card" style="background: ${GRADIENTS.pink}" onclick="this.dispatchEvent(new CustomEvent('copyBreakTime', {bubbles: true}))">
                     <div class="spark-icon">☕</div>
                     <div class="metric-label">Total Break Duration</div>
                     <div class="metric-value" data-k="break">${valuesHTML.break}</div>
@@ -1823,22 +1874,21 @@
         }
         totalDisplay.dataset.layout = layoutKey;
 
-        // Copy handlers read homeCopy (refreshed every tick) rather than this
-        // render's locals, since patched ticks don't re-bind them.
-        totalDisplay.addEventListener('copyDuration', () =>
-            copyToClipboard(formatCopyText('⏱️', 'Total Duration', homeCopy.total)));
+        const copyFrom = (e, text) => copyToClipboard(text).then(ok => { if (ok) flashCopied(e.target); });
+        totalDisplay.addEventListener('copyDuration', (e) =>
+            copyFrom(e, formatCopyText('⏱️', 'Total Duration', homeCopy.total)));
 
-        totalDisplay.addEventListener('copyCompletion', () =>
-            copyToClipboard(formatCopyText('🎯', `${homeCopy.targetHoursLabel} Completion`, homeCopy.completion)));
+        totalDisplay.addEventListener('copyCompletion', (e) =>
+            copyFrom(e, formatCopyText('🎯', `${homeCopy.targetHoursLabel} Completion`, homeCopy.completion)));
 
-        totalDisplay.addEventListener('copyOvertime', () =>
-            copyToClipboard(formatCopyText('⭐', 'Overtime', homeCopy.overtime)));
+        totalDisplay.addEventListener('copyOvertime', (e) =>
+            copyFrom(e, formatCopyText('⭐', 'Overtime', homeCopy.overtime)));
 
-        totalDisplay.addEventListener('copyRemaining', () =>
-            copyToClipboard(formatCopyText(homeCopy.remainingIcon, 'Remaining Time', homeCopy.remaining)));
+        totalDisplay.addEventListener('copyRemaining', (e) =>
+            copyFrom(e, formatCopyText(homeCopy.remainingIcon, 'Remaining Time', homeCopy.remaining)));
 
-        totalDisplay.addEventListener('copyBreakTime', () =>
-            copyToClipboard(formatCopyText('☕', 'Total Break Duration', homeCopy.break)));
+        totalDisplay.addEventListener('copyBreakTime', (e) =>
+            copyFrom(e, formatCopyText('☕', 'Total Break Duration', homeCopy.break)));
 
         totalDisplay.addEventListener('testNotification', () => {
             triggerTestNotification();
@@ -1869,7 +1919,6 @@
             showManualForm = true;
             manualEntries = pairs;
             if (openStart) { const p = flattenPunches(); p.push(openStart); repairFromPunches(p); }
-            prefillInputs = null;
             updateUI(container);
         });
 
@@ -1897,10 +1946,6 @@
         .dual-capsule .work-side:hover .work-text::before { content: 'Work: '; }
         .dual-capsule .break-side:hover .break-text::before { content: 'Break: '; }
         div[formarrayname="premises"].max-h-500 { max-height: 100% !important; }
-        /* Corner tab on the card (pen on the results page, ✕ on the edit page):
-           flush with the top-right corner, sharing the card's radius and border
-           so it reads as part of the card. 18px tall so it stays inside the
-           card's 20px padding and never touches the metric cards below. */
         .manual-icon-btn { position: absolute; top: 0; right: 0; width: 38px; height: 18px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(124, 58, 237, 0.1); border: none; border-left: 1px solid rgba(148, 163, 184, 0.25); border-bottom: 1px solid rgba(148, 163, 184, 0.25); border-radius: 0 15px 0 10px; cursor: pointer; transition: background 0.2s ease; z-index: 10; }
         .manual-icon-btn:hover { background: rgba(124, 58, 237, 0.22); }
         .manual-icon-btn:focus-visible { outline: 2px solid #8b5cf6; outline-offset: -2px; }
@@ -1952,7 +1997,6 @@
             isManualMode = false;
             manualEntries = [];
             showManualForm = false;
-            prefillInputs = null;
             dayApiData = null;
             tenMinAlertFired = false;
             bannerDismissed = false;

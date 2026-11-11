@@ -48,7 +48,7 @@ Open Keka, click the bookmark once, then open any day — the overlay appears. (
 
 ## Tech
 
-Vanilla JavaScript (ES2020+), a single IIFE with `'use strict'`. No dependencies, no bundler, no tests — validated by `node --check` for syntax and by loading against the live site. GitHub Actions for release automation.
+Vanilla JavaScript (ES2020+), a single IIFE with `'use strict'`. No dependencies, no bundler. A dependency-free test suite (`node --test tests/`) covers time parsing, the punch model and smoke renders; layout is validated by loading against the live site. GitHub Actions for release automation.
 
 ## Repository layout
 
