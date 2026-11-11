@@ -38,6 +38,7 @@ Other manual-mode notes:
 - Budget for ~290px: that's the panel's inner width inside Keka's regularization modal, far narrower than a standalone preview. Times drop the leading zero and the per-punch × floats on the time (shown on row hover) instead of taking inline space. Check layout changes inside the real modal, not just a wide preview.
 - A single input adds punches: one time inserts one punch, a range (`9:30 AM - 1:00 PM`, `–` or `to`) inserts both ends. Both go through `insertPunch` then re-pair.
 - The ✕ button exits immediately (no confirm), dropping the edited punches and falling back to the page's logs.
+- Everything renders inside Keka's regularization `<form>`. Every `<button>` the script creates must be `type="button"`, and Enter in its text inputs must `preventDefault()`. Otherwise Enter implicitly submits the form, which clicks the form's first submit button. That button is either our ✕ (kicking you back to the results page) or Keka's "+ Add Log" (adding a stray Attendance Adjustment row to the real request). This was fixed in v21.1.
 - No overlap validation: the punch/shift model sorts + re-pairs, and corrective inserts may intentionally interleave.
 
 ## Layout

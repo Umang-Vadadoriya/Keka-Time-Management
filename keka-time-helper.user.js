@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      21.0
+// @version      21.1
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -60,7 +60,7 @@
     let notifierOpenInMs = null;
     let homeCopy = {};
 
-    const SCRIPT_VERSION = '21.0';
+    const SCRIPT_VERSION = '21.1';
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1;
@@ -419,7 +419,7 @@
             const presets = [0, 15, 30, 45, 60];
             const isCustomBreak = plannedBreakMin > 0 && !presets.includes(plannedBreakMin);
             const breakChips = presets.map(m =>
-                `<button class="break-plan-chip${plannedBreakMin === m ? ' is-on' : ''}" data-min="${m}">${m === 0 ? 'None' : m === 60 ? '1h' : m + 'm'}</button>`
+                `<button type="button" class="break-plan-chip${plannedBreakMin === m ? ' is-on' : ''}" data-min="${m}">${m === 0 ? 'None' : m === 60 ? '1h' : m + 'm'}</button>`
             ).join('');
             const leaveNote = plannedBreakMin > 0
                 ? `after ${targetLbl} of work, including your ${plannedBreakMin}m planned break`
@@ -465,7 +465,7 @@
             const shortDur = d => d.hours ? `${d.hours}h ${d.minutes}m` : `${d.minutes}m`;
             const punch = (time, punchIdx) => {
                 const shown = time.replace(/^0/, '');
-                return `<span class="me-punch">${shown}<button class="remove-punch-btn" data-punch="${punchIdx}" title="Remove this punch" aria-label="Remove punch ${shown}"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 3l4 4M7 3l-4 4"></path></svg></button></span>`;
+                return `<span class="me-punch">${shown}<button type="button" class="remove-punch-btn" data-punch="${punchIdx}" title="Remove this punch" aria-label="Remove punch ${shown}"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 3l4 4M7 3l-4 4"></path></svg></button></span>`;
             };
             entriesListHTML = '<div class="me-list">';
             let prevEnd = null;
@@ -487,7 +487,7 @@
 
         const manualUI = `
             <div class="manual-entry-container">
-                <button id="exit-manual-mode-btn" class="manual-icon-btn" title="${hasEntries ? 'Discard and go back' : 'Cancel'}" aria-label="${hasEntries ? 'Discard and go back' : 'Cancel'}">
+                <button type="button" id="exit-manual-mode-btn" class="manual-icon-btn" title="${hasEntries ? 'Discard and go back' : 'Cancel'}" aria-label="${hasEntries ? 'Discard and go back' : 'Cancel'}">
                     <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path d="M18 6L6 18"></path>
                         <path d="M6 6l12 12"></path>
@@ -501,12 +501,12 @@
                 <div class="me-add">
                     <input type="text" id="manual-punch-input" autocomplete="off"
                         placeholder="${hasEntries ? '1:30 PM' : '9:30 AM - 1:00 PM'}" />
-                    <button id="add-punch-btn" class="me-btn${hasEntries ? '' : ' me-primary'}">Add</button>
+                    <button type="button" id="add-punch-btn" class="me-btn${hasEntries ? '' : ' me-primary'}">Add</button>
                 </div>
                 <div id="manual-error-message" class="me-error"></div>
                 <div class="me-hint">e.g. 1:30 PM, or 9:30 AM - 1:00 PM for a pair</div>
 
-                ${hasEntries ? '<button id="calculate-manual-btn" class="me-btn me-primary me-show-btn">Show metrics</button>' : ''}
+                ${hasEntries ? '<button type="button" id="calculate-manual-btn" class="me-btn me-primary me-show-btn">Show metrics</button>' : ''}
 
                 <style>
                     .manual-entry-container { text-align: left; }
@@ -700,7 +700,10 @@
                 if (next) next.focus();
             };
             addBtn.addEventListener('click', doAdd);
-            punchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+            // preventDefault: this page lives inside Keka's regularization
+            // <form>, so a bare Enter would implicitly submit it — clicking the
+            // form's first submit button (Keka's "+ Add Log", or ours).
+            punchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
         }
 
         if (calculateBtn) {
@@ -740,13 +743,17 @@
         });
         const bpCustom = document.getElementById('break-plan-custom');
         if (bpCustom) {
-            // 'change' (Enter/blur), not 'input' — the manual form doesn't auto
-            // re-render, so this keeps focus while typing and applies on commit.
-            bpCustom.addEventListener('change', () => {
+            // Apply on commit (Enter/blur), not 'input' — the manual form doesn't
+            // auto re-render, so this keeps focus while typing. Enter is handled
+            // here with preventDefault for the same implicit-submit reason as
+            // the punch input; 'change' still covers blur.
+            const applyCustom = () => {
                 const v = parseInt(bpCustom.value, 10);
                 plannedBreakMin = Number.isFinite(v) ? Math.min(480, Math.max(0, v)) : 0;
                 updateUI(container);
-            });
+            };
+            bpCustom.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyCustom(); } });
+            bpCustom.addEventListener('change', applyCustom);
         }
     }
 
@@ -1322,7 +1329,7 @@
                     text-align: center;
                     position: relative;
                 ">
-                    <button class="manual-icon-btn manual-entry-toggle-btn" title="Manual Entry Mode" onclick="this.dispatchEvent(new CustomEvent('toggleManualMode', {bubbles: true}))">
+                    <button type="button" class="manual-icon-btn manual-entry-toggle-btn" title="Manual Entry Mode" onclick="this.dispatchEvent(new CustomEvent('toggleManualMode', {bubbles: true}))">
                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 20h9"></path>
                             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
@@ -1454,7 +1461,7 @@
                 <div style="flex: 1; font-size: 13px; font-weight: 600;">
                     ${wrapupRemainingLabel} left to ${wrapupTargetLabel} — start wrapping up.
                 </div>
-                <button class="wrapup-dismiss-btn" aria-label="Dismiss" title="Dismiss" style="
+                <button type="button" class="wrapup-dismiss-btn" aria-label="Dismiss" title="Dismiss" style="
                     background: transparent; border: none; color: inherit; opacity: 0.7;
                     font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
                 ">✕</button>
@@ -1724,7 +1731,7 @@
                     -webkit-text-fill-color: #fff;
                 }
             </style>
-            <button class="manual-icon-btn manual-entry-toggle-btn" title="Manual Entry Mode" onclick="this.dispatchEvent(new CustomEvent('toggleManualMode', {bubbles: true}))">
+            <button type="button" class="manual-icon-btn manual-entry-toggle-btn" title="Manual Entry Mode" onclick="this.dispatchEvent(new CustomEvent('toggleManualMode', {bubbles: true}))">
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 20h9"></path>
                     <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
@@ -1761,7 +1768,7 @@
                 </div>
             </div>
             ${debugMode ? `<div style="margin-top: 20px; display: grid; gap: 10px;">
-                <button class="test-notification-btn" style="
+                <button type="button" class="test-notification-btn" style="
                     width: 100%;
                     padding: 12px 20px;
                     background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
@@ -1776,7 +1783,7 @@
                 " onclick="this.dispatchEvent(new CustomEvent('testNotification', {bubbles: true}))">
                     🔔 Test Notification (3s delay)
                 </button>
-                <button class="test-wrapup-btn" style="
+                <button type="button" class="test-wrapup-btn" style="
                     width: 100%;
                     padding: 12px 20px;
                     background: linear-gradient(135deg, #fb923c 0%, #ea580c 100%);
