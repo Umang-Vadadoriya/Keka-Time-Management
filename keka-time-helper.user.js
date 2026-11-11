@@ -2,7 +2,7 @@
 // @name         Enhanced Keka Log Duration by UV with Advanced Notifications
 // @name:en      Enhanced Keka Log Duration (English)
 // @namespace    http://tampermonkey.net/
-// @version      20.7
+// @version      21.0
 // @description  Calculate log durations with improved UI and smart notifications
 // @description:en Calculate log durations with improved UI and smart notifications (English)
 // @author       Umang Vadadoriya
@@ -58,8 +58,9 @@
     let audioCtx = null;
     let notifierPairs = [];
     let notifierOpenInMs = null;
+    let homeCopy = {};
 
-    const SCRIPT_VERSION = '20.7';
+    const SCRIPT_VERSION = '21.0';
     const EIGHT_HOURS_IN_MINUTES = 8 * 60;
     const FOUR_HOURS_IN_MINUTES = 4 * 60;
     const NOTIFICATION_INTERVAL = 1;
@@ -380,21 +381,26 @@
     }
 
     function renderManualEntryUI(container) {
+        const hasEntries = manualEntries.length > 0;
+        // Same palette + colour roles as the results page: purple = worked,
+        // blue = completion, pink = break.
         const gradients = {
             purple: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
             blue: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
-            green: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
-            orange: 'linear-gradient(135deg, #fb923c 0%, #ea580c 100%)',
-            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)',
-            red: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
+            pink: 'linear-gradient(135deg, #f472b6 0%, #db2777 100%)'
         };
 
         let previewHTML = '';
-        if (manualEntries.length > 0) {
+        if (hasEntries) {
             const preview = processManualEntries(false);
-            const breakHTML = Number.isFinite(preview.breakSeconds)
-                ? formatDurationHTML(preview.breakSeconds)
-                : formatDurationHTML((preview.breakTime || 0) * 60);
+            // Manual punches are minute-precise, so the edit page shows h/m
+            // only — a seconds field here would always read "0s".
+            const hmHTML = (sec) => {
+                const total = Math.max(0, Math.floor(sec / 60));
+                return `${Math.floor(total / 60)}<span class="dur-u">h</span> ${total % 60}<span class="dur-u">m</span>`;
+            };
+            const breakHTML = hmHTML(Number.isFinite(preview.breakSeconds) ? preview.breakSeconds : (preview.breakTime || 0) * 60);
+            const workHTML = hmHTML(Number.isFinite(preview.totalWorkSeconds) ? preview.totalWorkSeconds : (preview.totalHours || 0) * 3600);
             // Projected leave time for these entries, plus an adjustable extra
             // break — belongs here because it's derived from the punches you're
             // modelling (first punch + target + breaks so far + planned break).
@@ -404,75 +410,76 @@
                 firstStartDate: preview.firstStartDate,
                 breakMs: baseBreakMs + plannedBreakMin * 60000,
                 totalWorkSeconds: preview.totalWorkSeconds,
-            }).completionTime || 'N/A').replace(' (Completed ✓)', '');
-            // Break presets as tap chips + a custom-minutes input on the
-            // "Leave by" card. Active preset is inverted; a non-preset value
-            // lives in the custom box.
+            }).completionTime || 'N/A').replace(' (Completed ✓)', '')
+                .replace(/^0(\d)/, '$1').replace(/(\d{1,2}:\d{2}):\d{2}/, '$1');
+            // Break presets as tap chips + a custom-minutes box. Active preset
+            // gets the accent; a non-preset value lives in the custom box. The
+            // box deliberately doesn't carry .break-plan-chip — that class
+            // wires the preset click handler, which would reset it on focus.
             const presets = [0, 15, 30, 45, 60];
             const isCustomBreak = plannedBreakMin > 0 && !presets.includes(plannedBreakMin);
-            const breakChips = presets.map(m => {
-                const on = plannedBreakMin === m;
-                return `<button class="break-plan-chip" data-min="${m}" style="padding:5px 8px;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums;background:${on ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.16)'};color:${on ? '#1d4ed8' : '#fff'};">${m === 0 ? 'None' : '+' + m}</button>`;
-            }).join('');
+            const breakChips = presets.map(m =>
+                `<button class="break-plan-chip${plannedBreakMin === m ? ' is-on' : ''}" data-min="${m}">${m === 0 ? 'None' : m === 60 ? '1h' : m + 'm'}</button>`
+            ).join('');
+            const leaveNote = plannedBreakMin > 0
+                ? `after ${targetLbl} of work, including your ${plannedBreakMin}m planned break`
+                : `after ${targetLbl} of work, if you take no more breaks`;
             previewHTML = `
-                <div style="padding: 14px 16px; background: ${gradients.blue}; border-radius: 12px; color: white; margin-bottom: 12px;">
-                    <div style="font-size: 13px; opacity: 0.9; margin-bottom: 4px; font-weight: 500;">🎯 Leave by (${targetLbl})</div>
-                    <div style="font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;">${subdueSecondsHTML(plannedOut)}</div>
-                    <div style="display: flex; align-items: center; gap: 5px; margin-top: 12px; flex-wrap: nowrap;">
-                        <span style="font-size: 14px; margin-right: 1px; flex-shrink: 0;">☕</span>
-                        ${breakChips}
-                        <input id="break-plan-custom" type="number" min="0" max="480" inputmode="numeric" placeholder="min" value="${isCustomBreak ? plannedBreakMin : ''}" title="Custom minutes"
-                            style="width:48px;flex-shrink:0;padding:5px 4px;border:none;border-radius:7px;font-size:12px;font-weight:700;text-align:center;box-sizing:border-box;font-variant-numeric:tabular-nums;background:${isCustomBreak ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.16)'};color:${isCustomBreak ? '#1d4ed8' : '#fff'};">
+                <div class="me-grid">
+                    <div class="metric-card" style="background: ${gradients.purple}">
+                        <div class="spark-icon">⏱️</div>
+                        <div class="metric-label">Total Duration</div>
+                        <div class="metric-value">${workHTML}</div>
+                    </div>
+                    <div class="metric-card" style="background: ${gradients.pink}">
+                        <div class="spark-icon">☕</div>
+                        <div class="metric-label">Break so far</div>
+                        <div class="metric-value">${breakHTML}</div>
                     </div>
                 </div>
-                <div style="display: flex; gap: 12px; margin-bottom: 16px;">
-                    <div style="flex: 1; padding: 14px 16px; background: ${gradients.green}; border-radius: 12px; color: white;">
-                        <div style="font-size: 13px; opacity: 0.9; margin-bottom: 4px; font-weight: 500;">Preview Total</div>
-                        <div style="font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums;">${preview.totalDurationHTML || preview.totalDuration}</div>
-                    </div>
-                    <div style="flex: 1; padding: 14px 16px; background: ${gradients.pink}; border-radius: 12px; color: white;">
-                        <div style="font-size: 13px; opacity: 0.9; margin-bottom: 4px; font-weight: 500;">Break</div>
-                        <div style="font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums;">${breakHTML}</div>
+                <div class="metric-card me-leave-card" style="background: ${gradients.blue}">
+                    <div class="spark-icon">🎯</div>
+                    <div class="metric-label">${targetLbl} Completion</div>
+                    <div class="metric-value">${plannedOut}</div>
+                    <div class="me-leave-note">${leaveNote}</div>
+                    <div class="me-break-plan">
+                        <span class="me-plan-label">Taking another break? It moves this time later</span>
+                        ${breakChips}
+                        <label class="me-custom${isCustomBreak ? ' is-on' : ''}" title="Any other break length, in minutes. Press Enter to apply.">
+                            <input id="break-plan-custom" type="number" min="0" max="480" inputmode="numeric" placeholder="Other" value="${isCustomBreak ? plannedBreakMin : ''}">
+                            ${isCustomBreak ? '<span>min</span>' : ''}
+                        </label>
                     </div>
                 </div>
             `;
         }
 
+        // Punches as a flat timeline: one row per IN→OUT pair, the purple work
+        // pill sitting on the connector between the two times, and the break
+        // before that pair as a blue pill on the right (same colours as the
+        // work/break capsule on Keka's log rows). × removes that punch; it
+        // floats on the time and only shows on row hover, because the panel
+        // inside Keka's modal is ~290px wide and there's no room for it inline.
         let entriesListHTML = '';
-        if (manualEntries.length > 0) {
-            const punchChip = (label, time, punchIdx, isNow) => `
-                <span style="display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;padding:6px 10px;background:rgba(148,163,184,0.15);border:1px solid rgba(148,163,184,0.3);border-radius:8px;font-size:13px;font-weight:600;color:inherit;">
-                    <span style="opacity:0.6;font-size:11px;font-weight:700;letter-spacing:0.4px;flex-shrink:0;">${label}</span>
-                    ${isNow ? '<span style="background:rgba(34,197,94,0.18);color:#22c55e;padding:1px 7px;border-radius:6px;font-weight:700;">now</span>' : `<span style="white-space:nowrap;">${time}</span><button class="remove-punch-btn" data-punch="${punchIdx}" title="Remove this punch" aria-label="Remove punch" style="margin-left:auto;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:none;border-radius:50%;background:rgba(239,68,68,0.2);color:#ef4444;font-size:13px;line-height:1;cursor:pointer;">×</button>`}
-                </span>`;
-            entriesListHTML = '<div style="margin-bottom: 16px; display:flex; flex-direction:column; gap:8px;">';
+        if (hasEntries) {
+            const shortDur = d => d.hours ? `${d.hours}h ${d.minutes}m` : `${d.minutes}m`;
+            const punch = (time, punchIdx) => {
+                const shown = time.replace(/^0/, '');
+                return `<span class="me-punch">${shown}<button class="remove-punch-btn" data-punch="${punchIdx}" title="Remove this punch" aria-label="Remove punch ${shown}"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 3l4 4M7 3l-4 4"></path></svg></button></span>`;
+            };
+            entriesListHTML = '<div class="me-list">';
             let prevEnd = null;
             manualEntries.forEach((entry, index) => {
                 const isOpen = !entry.end;
-                const inIdx = index * 2, outIdx = index * 2 + 1;
-
                 const work = calculateDuration(entry.start, entry.end || 'MISSING');
-                const workText = `${work.hours}h ${work.minutes}m`;
-                const brk = prevEnd ? calculateDuration(prevEnd, entry.start) : null;
-                const breakText = brk ? `${brk.hours}h ${brk.minutes}m` : null;
-                const capsuleHTML = brk
-                    ? `<div class="duration-capsule dual-capsule"><div class="work-side" data-work="${workText}" title="Work: ${workText}"><span class="work-text">${workText}</span></div><div class="break-side" data-break="${breakText}" title="Break: ${breakText}"><span class="break-text">${breakText}</span></div></div>`
-                    : `<div class="duration-capsule work-only">Work: ${workText}</div>`;
+                const brk = prevEnd ? shortDur(calculateDuration(prevEnd, entry.start)) : null;
                 entriesListHTML += `
-                    <div style="
-                        padding: 10px 12px;
-                        background: rgba(148, 163, 184, 0.08);
-                        border: 1px solid rgba(148, 163, 184, 0.25);
-                        border-radius: 10px;
-                    ">
-                        <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;">
-                            ${punchChip('IN', entry.start, inIdx, false)}
-                            <span style="opacity:0.4;">→</span>
-                            ${punchChip('OUT', entry.end, outIdx, isOpen)}
-                        </div>
-                        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">${capsuleHTML}${isOpen ? '<span style="font-size:11px;opacity:0.6;">· working</span>' : ''}</div>
-                    </div>
-                `;
+                    <div class="me-row">
+                        ${punch(entry.start, index * 2)}
+                        <span class="me-span${isOpen ? ' is-open' : ''}"><span class="me-pill me-pill-work" title="Worked in this pair">${formatDuration(work.hours, work.minutes)}</span></span>
+                        <span class="me-end">${isOpen ? '<span class="me-now">now</span>' : punch(entry.end, index * 2 + 1)}</span>
+                        <span class="me-brk-slot">${brk ? `<span class="me-pill me-pill-break" title="Break before this pair">☕ ${brk}</span>` : ''}</span>
+                    </div>`;
                 prevEnd = entry.end;
             });
             entriesListHTML += '</div>';
@@ -480,171 +487,85 @@
 
         const manualUI = `
             <div class="manual-entry-container">
-                <div style="
-                    text-align: center;
-                    margin-bottom: 20px;
-                    padding-bottom: 16px;
-                    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
-                ">
-                    <div style="font-size: 20px; font-weight: 700; color: inherit; margin-bottom: 4px;">📝 Manual Log Entry</div>
-                    <div style="font-size: 13px; color: inherit; opacity: 0.65;">Add your time entries manually</div>
-                </div>
+                <button id="exit-manual-mode-btn" class="manual-icon-btn" title="${hasEntries ? 'Discard and go back' : 'Cancel'}" aria-label="${hasEntries ? 'Discard and go back' : 'Cancel'}">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M18 6L6 18"></path>
+                        <path d="M6 6l12 12"></path>
+                    </svg>
+                </button>
+                <div class="me-title">✏️ Manual entry</div>
 
                 ${previewHTML}
-                ${manualEntries.length > 0 ? `
-                <div style="display:flex;align-items:center;gap:8px;margin:0 0 14px;opacity:0.5;font-size:10px;font-weight:700;letter-spacing:0.6px;">
-                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
-                    PUNCHES
-                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
-                </div>` : ''}
                 ${entriesListHTML}
 
-                <div id="manual-error-message" style="
-                    display: none;
-                    padding: 12px;
-                    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-                    border-radius: 8px;
-                    color: white;
-                    font-size: 13px;
-                    font-weight: 500;
-                    margin-bottom: 16px;
-                "></div>
-
-                <div style="
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 12px;
-                    margin-bottom: 16px;
-                ">
-                    <div>
-                        <label style="
-                            display: block;
-                            font-size: 12px;
-                            font-weight: 600;
-                            color: inherit;
-                            opacity: 0.7;
-                            margin-bottom: 6px;
-                        ">Start Time</label>
-                        <input
-                            type="text"
-                            id="manual-start-time"
-                            placeholder="9:00 AM"
-                            style="
-                                width: 100%;
-                                padding: 10px 12px;
-                                border: 1px solid rgba(148, 163, 184, 0.35);
-                                background: rgba(148, 163, 184, 0.14);
-                                color: inherit;
-                                border-radius: 8px;
-                                font-size: 14px;
-                                transition: border-color 0.2s, box-shadow 0.2s;
-                                box-sizing: border-box;
-                            "
-                        />
-                    </div>
-                    <div>
-                        <label style="
-                            display: block;
-                            font-size: 12px;
-                            font-weight: 600;
-                            color: inherit;
-                            opacity: 0.7;
-                            margin-bottom: 6px;
-                        ">End Time</label>
-                        <input
-                            type="text"
-                            id="manual-end-time"
-                            placeholder="5:00 PM or blank"
-                            style="
-                                width: 100%;
-                                padding: 10px 12px;
-                                border: 1px solid rgba(148, 163, 184, 0.35);
-                                background: rgba(148, 163, 184, 0.14);
-                                color: inherit;
-                                border-radius: 8px;
-                                font-size: 14px;
-                                transition: border-color 0.2s, box-shadow 0.2s;
-                                box-sizing: border-box;
-                            "
-                        />
-                    </div>
+                <div class="me-add">
+                    <input type="text" id="manual-punch-input" autocomplete="off"
+                        placeholder="${hasEntries ? '1:30 PM' : '9:30 AM - 1:00 PM'}" />
+                    <button id="add-punch-btn" class="me-btn${hasEntries ? '' : ' me-primary'}">Add</button>
                 </div>
+                <div id="manual-error-message" class="me-error"></div>
+                <div class="me-hint">e.g. 1:30 PM, or 9:30 AM - 1:00 PM for a pair</div>
 
-                <button id="add-manual-entry-btn" style="
-                    width: 100%;
-                    padding: 12px 20px;
-                    background: ${manualEntries.length > 0 ? 'transparent' : gradients.purple};
-                    color: ${manualEntries.length > 0 ? 'inherit' : 'white'};
-                    border: ${manualEntries.length > 0 ? '1px solid rgba(148, 163, 184, 0.4)' : 'none'};
-                    border-radius: 10px;
-                    font-size: 14px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                    box-shadow: ${manualEntries.length > 0 ? 'none' : '0 4px 6px rgba(0, 0, 0, 0.1)'};
-                    margin-bottom: 12px;
-                ">➕ Add In + Out pair</button>
-
-                ${manualEntries.length > 0 ? `
-                <div style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;opacity:0.5;font-size:11px;">
-                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
-                    or fix one punch
-                    <div style="flex:1;height:1px;background:rgba(148,163,184,0.3);"></div>
-                </div>
-
-                <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:16px;">
-                    <input
-                        type="text"
-                        id="manual-insert-time"
-                        placeholder="e.g. 1:30 PM"
-                        style="width:100%;padding:10px 12px;border:1px solid rgba(148,163,184,0.35);background:rgba(148,163,184,0.14);color:inherit;border-radius:8px;font-size:14px;box-sizing:border-box;transition:border-color 0.2s, box-shadow 0.2s;"
-                    />
-                    <button id="insert-punch-btn" style="padding:10px 16px;background:transparent;color:#3b82f6;border:1px solid rgba(59,130,246,0.5);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all 0.2s ease;">↳ Insert punch</button>
-                </div>
-                ` : ''}
-
-                ${manualEntries.length > 0 ? `
-                    <button id="calculate-manual-btn" style="
-                        width: 100%;
-                        padding: 12px 20px;
-                        background: ${gradients.green};
-                        color: white;
-                        border: none;
-                        border-radius: 10px;
-                        font-size: 14px;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                        margin-bottom: 12px;
-                    ">✓ Calculate & Show Metrics</button>
-                ` : ''}
-
-                <button id="exit-manual-mode-btn" style="
-                    width: 100%;
-                    padding: 10px 20px;
-                    background: transparent;
-                    color: inherit;
-                    opacity: 0.75;
-                    border: 1px solid rgba(148, 163, 184, 0.35);
-                    border-radius: 10px;
-                    font-size: 13px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                ">${manualEntries.length > 0 ? '← Back to Results' : '← Cancel'}</button>
+                ${hasEntries ? '<button id="calculate-manual-btn" class="me-btn me-primary me-show-btn">Show metrics</button>' : ''}
 
                 <style>
-                    #manual-start-time:focus, #manual-end-time:focus, #manual-insert-time:focus {
-                        outline: none;
-                        border-color: #a78bfa;
-                        box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.25);
-                    }
-                    .remove-punch-btn { transition: background 0.15s ease, transform 0.1s ease; }
-                    .remove-punch-btn:hover { background: rgba(239, 68, 68, 0.32) !important; color: #fff !important; }
-                    .remove-punch-btn:focus-visible { outline: 2px solid #ef4444; outline-offset: 1px; }
+                    .manual-entry-container { text-align: left; }
+                    .me-title { margin: -4px 44px 16px 0; font-size: 14px; font-weight: 600; opacity: 0.8; }
+
+
+                    .me-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px; }
+                    .manual-entry-container .metric-card { padding: 16px; border-radius: 12px; color: white; position: relative; overflow: hidden; }
+                    .manual-entry-container .metric-label { font-size: 14px; opacity: 0.9; margin-bottom: 6px; font-weight: 500; }
+                    .manual-entry-container .metric-value { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+                    .manual-entry-container .spark-icon { position: absolute; right: 12px; top: 12px; opacity: 0.2; font-size: 24px; }
+                    .me-leave-card { margin-bottom: 20px; }
+                    .me-leave-note { margin-top: 2px; font-size: 12px; opacity: 0.85; }
+                    .me-break-plan { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.25); }
+                    .me-plan-label { flex-basis: 100%; font-size: 12px; font-weight: 500; opacity: 0.9; }
+                    .break-plan-chip { padding: 5px 10px; border: none; border-radius: 7px; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; font-variant-numeric: tabular-nums; transition: background 0.15s ease; }
+                    .break-plan-chip:hover { background: rgba(255, 255, 255, 0.28); }
+                    .break-plan-chip.is-on { background: rgba(255, 255, 255, 0.95); color: #1d4ed8; }
+                    .me-custom { display: inline-flex; align-items: center; gap: 3px; padding: 0 10px 0 4px; border-radius: 7px; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 12px; font-weight: 700; cursor: text; }
+                    .me-custom:focus-within { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6); }
+                    .me-custom.is-on { background: rgba(255, 255, 255, 0.95); color: #1d4ed8; }
+                    .me-custom span { opacity: 0.75; }
+                    #break-plan-custom { width: 44px; padding: 5px 0 5px 6px; border: none; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; outline: none; -moz-appearance: textfield; }
+                    #break-plan-custom::-webkit-inner-spin-button, #break-plan-custom::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+                    #break-plan-custom::placeholder { color: inherit; opacity: 0.75; }
+
+                    .me-list { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 10px; row-gap: 8px; margin-bottom: 20px; }
+                    .me-row { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-columns: subgrid; align-items: center; padding: 9px 10px; border-radius: 10px; background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.2); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+                    .me-punch { position: relative; white-space: nowrap; justify-self: start; padding-right: 12px; }
+                    .me-span { min-width: 0; display: flex; align-items: center; }
+                    .me-span::before, .me-span::after { content: ''; flex: 1; min-width: 6px; height: 2px; }
+                    .me-span .me-pill-work { padding: 3px 10px; }
+                    .me-span::before { background: linear-gradient(90deg, rgba(167, 139, 250, 0.15), rgba(167, 139, 250, 0.8)); }
+                    .me-span::after { background: linear-gradient(90deg, rgba(124, 58, 237, 0.8), rgba(124, 58, 237, 0.15)); }
+                    .me-span.is-open::after { background: repeating-linear-gradient(90deg, rgba(124, 58, 237, 0.7) 0 4px, transparent 4px 8px); }
+                    .me-now { color: #22c55e; font-weight: 700; }
+                    .me-pill { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border-radius: 20px; color: #fff; font-size: 12px; font-weight: 500; white-space: nowrap; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+                    .me-pill-work { background: ${gradients.purple}; }
+                    .me-pill-break { background: ${gradients.blue}; padding: 3px 8px; font-size: 11px; }
+                    .me-brk-slot { display: flex; justify-content: flex-end; }
+                    .remove-punch-btn { position: absolute; top: -6px; right: -4px; display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; border: none; border-radius: 50%; background: #ef4444; color: #fff; line-height: 0; cursor: pointer; opacity: 0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: opacity 0.15s ease, transform 0.1s ease; z-index: 1; }
+                    .remove-punch-btn svg { width: 10px; height: 10px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
+                    .me-row:hover .remove-punch-btn { opacity: 0.85; }
+                    .remove-punch-btn:hover { opacity: 1 !important; transform: scale(1.1); }
+                    .remove-punch-btn:focus-visible { opacity: 1; outline: 2px solid #ef4444; outline-offset: 1px; }
                     .remove-punch-btn:active { transform: scale(0.9); }
-                    #add-manual-entry-btn:hover, #insert-punch-btn:hover { filter: brightness(1.05); border-color: rgba(148, 163, 184, 0.6); }
+
+                    .me-add { display: flex; gap: 8px; }
+                    #manual-punch-input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 8px; background: rgba(148, 163, 184, 0.1); color: inherit; font-size: 14px; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; }
+                    #manual-punch-input:focus { outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25); }
+                    .me-error { display: none; margin-top: 6px; font-size: 12px; font-weight: 500; color: #ef4444; }
+                    .me-hint { margin-top: 6px; font-size: 11px; opacity: 0.5; }
+
+                    .me-btn { padding: 10px 16px; border: 1px solid rgba(148, 163, 184, 0.4); border-radius: 10px; background: transparent; color: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: all 0.3s ease; }
+                    .me-btn:hover { border-color: rgba(148, 163, 184, 0.7); }
+                    .me-btn.me-primary { background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%); border-color: transparent; color: #fff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+                    .me-btn.me-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); }
+                    .me-btn.me-primary:active { transform: translateY(0); }
+                    .me-show-btn { width: 100%; margin-top: 20px; padding: 12px 20px; }
                     .manual-entry-container .dur-u { font-size: 0.62em; font-weight: 500; opacity: 0.78; margin-left: 1px; }
                     .manual-entry-container .dur-s { font-size: 0.7em; font-weight: 500; opacity: 0.78; margin-left: 8px; letter-spacing: 0.3px; }
                     .uv-signature {
@@ -734,18 +655,11 @@
     }
 
     function attachManualEntryHandlers(container) {
-        const addBtn = document.getElementById('add-manual-entry-btn');
+        const addBtn = document.getElementById('add-punch-btn');
         const calculateBtn = document.getElementById('calculate-manual-btn');
         const exitBtn = document.getElementById('exit-manual-mode-btn');
-        const startInput = document.getElementById('manual-start-time');
-        const endInput = document.getElementById('manual-end-time');
+        const punchInput = document.getElementById('manual-punch-input');
         const errorMsg = document.getElementById('manual-error-message');
-
-        if (prefillInputs) {
-            if (startInput) startInput.value = prefillInputs.start || '';
-            if (endInput) endInput.value = prefillInputs.end || '';
-            prefillInputs = null;
-        }
 
         function showError(message) {
             errorMsg.textContent = message;
@@ -759,45 +673,34 @@
             errorMsg.style.display = 'none';
         }
 
-        if (addBtn) {
-            addBtn.addEventListener('click', () => {
+        // One input for both cases: a single time inserts one punch, a range
+        // ("9:30 AM - 1:00 PM", "–" or "to" also work) inserts a pair.
+        // Either way the punch list is re-paired by time.
+        if (addBtn && punchInput) {
+            const doAdd = () => {
                 clearError();
-                const startTime = startInput.value.trim();
-                const endTime = endInput.value.trim();
-
-                const validation = validateManualEntry(startTime, endTime);
-                if (!validation.isValid) {
-                    showError(validation.errors.join('. '));
+                const parts = punchInput.value.split(/\s*(?:-|–|\bto\b)\s*/i).map(s => s.trim()).filter(Boolean);
+                if (parts.length === 0 || parts.length > 2) {
+                    showError('Enter a time like 1:30 PM, or a range like 9:30 AM - 1:00 PM');
                     return;
                 }
-
-                const punches = flattenPunches();
-                punches.push(normalizeTimeFormat(startTime));
-                if (endTime) punches.push(normalizeTimeFormat(endTime));
-                repairFromPunches(punches);
-
-                startInput.value = '';
-                endInput.value = '';
-                updateUI(container);
-            });
-        }
-
-        const insertBtn = document.getElementById('insert-punch-btn');
-        const insertInput = document.getElementById('manual-insert-time');
-        if (insertBtn && insertInput) {
-            const doInsert = () => {
-                clearError();
-                const t = insertInput.value.trim();
-                if (!validateTimeFormat(t)) {
+                if (parts.length === 2) {
+                    const validation = validateManualEntry(parts[0], parts[1]);
+                    if (!validation.isValid) {
+                        showError(validation.errors.join('. '));
+                        return;
+                    }
+                } else if (!validateTimeFormat(parts[0])) {
                     showError('Invalid time format. Use HH:MM AM/PM (e.g., 1:30 PM)');
                     return;
                 }
-                insertPunch(t);
-                insertInput.value = '';
+                parts.forEach(t => insertPunch(t));
                 updateUI(container);
+                const next = document.getElementById('manual-punch-input');
+                if (next) next.focus();
             };
-            insertBtn.addEventListener('click', doInsert);
-            insertInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doInsert(); });
+            addBtn.addEventListener('click', doAdd);
+            punchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
         }
 
         if (calculateBtn) {
@@ -829,7 +732,7 @@
             });
         });
 
-        document.querySelectorAll('.break-plan-chip').forEach(chip => {
+        document.querySelectorAll('.break-plan-chip[data-min]').forEach(chip => {
             chip.addEventListener('click', (e) => {
                 plannedBreakMin = parseInt(e.currentTarget.getAttribute('data-min')) || 0;
                 updateUI(container);
@@ -843,39 +746,6 @@
                 const v = parseInt(bpCustom.value, 10);
                 plannedBreakMin = Number.isFinite(v) ? Math.min(480, Math.max(0, v)) : 0;
                 updateUI(container);
-            });
-        }
-
-        if (addBtn) {
-            addBtn.addEventListener('mouseenter', () => {
-                addBtn.style.transform = 'translateY(-2px)';
-                addBtn.style.boxShadow = '0 6px 12px rgba(0, 0, 0, 0.15)';
-            });
-            addBtn.addEventListener('mouseleave', () => {
-                addBtn.style.transform = 'translateY(0)';
-                addBtn.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
-            });
-        }
-
-        if (calculateBtn) {
-            calculateBtn.addEventListener('mouseenter', () => {
-                calculateBtn.style.transform = 'translateY(-2px)';
-                calculateBtn.style.boxShadow = '0 6px 12px rgba(0, 0, 0, 0.15)';
-            });
-            calculateBtn.addEventListener('mouseleave', () => {
-                calculateBtn.style.transform = 'translateY(0)';
-                calculateBtn.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
-            });
-        }
-
-        if (exitBtn) {
-            exitBtn.addEventListener('mouseenter', () => {
-                exitBtn.style.borderColor = 'rgba(148, 163, 184, 0.6)';
-                exitBtn.style.opacity = '1';
-            });
-            exitBtn.addEventListener('mouseleave', () => {
-                exitBtn.style.borderColor = 'rgba(148, 163, 184, 0.35)';
-                exitBtn.style.opacity = '0.75';
             });
         }
     }
@@ -1154,7 +1024,9 @@
                 tenMinAlertFired = false;
                 bannerDismissed = false;
             }
-            updateUI(container);
+            // The manual form only re-renders on user action; a timed redraw
+            // would wipe whatever is being typed into its inputs.
+            if (!showManualForm) updateUI(container);
         }, NOTIFICATION_INTERVAL * 60 * 1000);
 
         renderInterval = setInterval(() => {
@@ -1440,40 +1312,6 @@
                 container.appendChild(totalDisplay);
             }
             totalDisplay.innerHTML = `
-                <style>
-                    .manual-icon-btn {
-                        position: absolute;
-                        top: 2px;
-                        right: 2px;
-                        width: 25px;
-                        height: 25px;
-                        background: rgba(124, 58, 237, 0.1);
-                        border: 1px solid rgba(124, 58, 237, 0.2);
-                        border-radius: 50%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        cursor: pointer;
-                        transition: all 0.2s ease;
-                        opacity: 0.6;
-                        z-index: 10;
-                    }
-                    .manual-icon-btn:hover {
-                        opacity: 1;
-                        background: rgba(124, 58, 237, 0.15);
-                        transform: scale(1.05);
-                        box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
-                    }
-                    .manual-icon-btn svg {
-                        width: 14px;
-                        height: 14px;
-                        stroke: #7c3aed;
-                        fill: none;
-                        stroke-width: 2;
-                        stroke-linecap: round;
-                        stroke-linejoin: round;
-                    }
-                </style>
                 <div style="
                     margin: 20px;
                     padding: 40px 20px;
@@ -1622,7 +1460,31 @@
                 ">✕</button>
             </div>` : '';
 
-        totalDisplay.style.cssText = isCompleted ? `
+        // The results card ticks every second, but only its five values move.
+        // Rebuild the whole card only when the layout changes (completed,
+        // wrap-up banner, day mode, debug); otherwise patch the values in place
+        // so animations, hover state and listeners survive the tick.
+        const breakSecs = Number.isFinite(results.breakSeconds) ? results.breakSeconds : (results.breakTime || 0) * 60;
+        const valuesHTML = {
+            total: results.totalDurationHTML || formatDurationHTML((results.totalHours || 0) * 3600),
+            completion: subdueSecondsHTML(completionTime),
+            overtime: overtimeHTML,
+            remaining: remainingTimeStr,
+            break: formatDurationHTML(breakSecs),
+        };
+        homeCopy = {
+            total: results.totalDuration,
+            completion: completionTime,
+            overtime,
+            remaining: remainingTimeText,
+            remainingIcon: isCompleted ? '🎉' : '⌛',
+            break: Number.isFinite(results.breakSeconds) ? formatDurationSec(results.breakSeconds) : `${Math.floor(results.breakTime / 60)}h ${results.breakTime % 60}m`,
+            targetHoursLabel,
+        };
+        const layoutKey = JSON.stringify([isCompleted, showWrapupBanner && wrapupRemainingLabel, debugMode, targetHoursLabel]);
+        const canPatch = totalDisplay.dataset.layout === layoutKey && !!totalDisplay.querySelector('[data-k]');
+
+        if (!canPatch) totalDisplay.style.cssText = isCompleted ? `
             margin: 20px;
             padding: 20px;
             background: rgba(16, 185, 129, 0.08);
@@ -1695,6 +1557,14 @@
             const text = existingCapsule.querySelector('.mode-full-text');
             if (icon) icon.textContent = modeIcon;
             if (text) text.textContent = modeText;
+        }
+
+        if (canPatch) {
+            totalDisplay.querySelectorAll('[data-k]').forEach(el => {
+                const v = valuesHTML[el.dataset.k];
+                if (el._shown !== v) { el.innerHTML = v; el._shown = v; }
+            });
+            return;
         }
 
         totalDisplay.innerHTML = `
@@ -1853,38 +1723,6 @@
                 .uv-full-name {
                     -webkit-text-fill-color: #fff;
                 }
-                .manual-icon-btn {
-                    position: absolute;
-                    top: 2px;
-                    right: 2px;
-                    width: 23px;
-                    height: 23px;
-                    background: rgba(124, 58, 237, 0.1);
-                    border: 1px solid rgba(124, 58, 237, 0.2);
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                    opacity: 0.6;
-                    z-index: 10;
-                }
-                .manual-icon-btn:hover {
-                    opacity: 1;
-                    background: rgba(124, 58, 237, 0.15);
-                    transform: scale(1.05);
-                    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
-                }
-                .manual-icon-btn svg {
-                    width: 14px;
-                    height: 14px;
-                    stroke: #7c3aed;
-                    fill: none;
-                    stroke-width: 2;
-                    stroke-linecap: round;
-                    stroke-linejoin: round;
-                }
             </style>
             <button class="manual-icon-btn manual-entry-toggle-btn" title="Manual Entry Mode" onclick="this.dispatchEvent(new CustomEvent('toggleManualMode', {bubbles: true}))">
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -1897,29 +1735,29 @@
                 <div class="metric-card" style="background: ${gradients.purple}" onclick="this.dispatchEvent(new CustomEvent('copyDuration', {bubbles: true}))">
                     <div class="spark-icon">⏱️</div>
                     <div class="metric-label">Total Duration</div>
-                    <div class="metric-value">${results.totalDurationHTML || formatDurationHTML((results.totalHours || 0) * 3600)}</div>
+                    <div class="metric-value" data-k="total">${valuesHTML.total}</div>
                 </div>
                 <div class="metric-card" style="background: ${gradients.blue}" onclick="this.dispatchEvent(new CustomEvent('copyCompletion', {bubbles: true}))">
                     <div class="spark-icon">🎯</div>
                     <div class="metric-label">${targetHoursLabel} Completion</div>
-                    <div class="metric-value">${subdueSecondsHTML(completionTime)}</div>
+                    <div class="metric-value" data-k="completion">${valuesHTML.completion}</div>
                 </div>
                 <div class="metric-card" style="background: ${gradients.orange}" onclick="this.dispatchEvent(new CustomEvent('copyOvertime', {bubbles: true}))">
                     <div class="spark-icon">⭐</div>
                     <div class="metric-label">Overtime</div>
-                    <div class="metric-value">${overtimeHTML}</div>
+                    <div class="metric-value" data-k="overtime">${valuesHTML.overtime}</div>
                 </div>
                 <div class="metric-card remaining-time-card" style="background: ${isCompleted ? gradients.completed : gradients.green}">
                     <div class="spark-icon">${isCompleted ? '🎉' : '⌛'}</div>
                     <div class="metric-label">Remaining Time</div>
-                    <div class="metric-value">${remainingTimeStr}</div>
+                    <div class="metric-value" data-k="remaining">${valuesHTML.remaining}</div>
                 </div>
             </div>
             <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
                 <div class="metric-card" style="background: ${gradients.pink}" onclick="this.dispatchEvent(new CustomEvent('copyBreakTime', {bubbles: true}))">
                     <div class="spark-icon">☕</div>
                     <div class="metric-label">Total Break Duration</div>
-                    <div class="metric-value">${formatDurationHTML((Number.isFinite(results.breakSeconds) ? results.breakSeconds : (results.breakTime || 0) * 60))}</div>
+                    <div class="metric-value" data-k="break">${valuesHTML.break}</div>
                 </div>
             </div>
             ${debugMode ? `<div style="margin-top: 20px; display: grid; gap: 10px;">
@@ -1976,21 +1814,24 @@
             oldTotalDisplay.parentNode.replaceChild(newTotalDisplay, oldTotalDisplay);
             totalDisplay = newTotalDisplay;
         }
+        totalDisplay.dataset.layout = layoutKey;
 
+        // Copy handlers read homeCopy (refreshed every tick) rather than this
+        // render's locals, since patched ticks don't re-bind them.
         totalDisplay.addEventListener('copyDuration', () =>
-            copyToClipboard(formatCopyText('⏱️', 'Total Duration', results.totalDuration)));
+            copyToClipboard(formatCopyText('⏱️', 'Total Duration', homeCopy.total)));
 
         totalDisplay.addEventListener('copyCompletion', () =>
-            copyToClipboard(formatCopyText('🎯', `${targetHoursLabel} Completion`, completionTime)));
+            copyToClipboard(formatCopyText('🎯', `${homeCopy.targetHoursLabel} Completion`, homeCopy.completion)));
 
         totalDisplay.addEventListener('copyOvertime', () =>
-            copyToClipboard(formatCopyText('⭐', 'Overtime', overtime)));
+            copyToClipboard(formatCopyText('⭐', 'Overtime', homeCopy.overtime)));
 
         totalDisplay.addEventListener('copyRemaining', () =>
-            copyToClipboard(formatCopyText(isCompleted ? '🎉' : '⌛', 'Remaining Time', remainingTimeText)));
+            copyToClipboard(formatCopyText(homeCopy.remainingIcon, 'Remaining Time', homeCopy.remaining)));
 
         totalDisplay.addEventListener('copyBreakTime', () =>
-            copyToClipboard(formatCopyText('☕', 'Total Break Duration', Number.isFinite(results.breakSeconds) ? formatDurationSec(results.breakSeconds) : `${Math.floor(results.breakTime / 60)}h ${results.breakTime % 60}m`)));
+            copyToClipboard(formatCopyText('☕', 'Total Break Duration', homeCopy.break)));
 
         totalDisplay.addEventListener('testNotification', () => {
             triggerTestNotification();
@@ -2049,6 +1890,14 @@
         .dual-capsule .work-side:hover .work-text::before { content: 'Work: '; }
         .dual-capsule .break-side:hover .break-text::before { content: 'Break: '; }
         div[formarrayname="premises"].max-h-500 { max-height: 100% !important; }
+        /* Corner tab on the card (pen on the results page, ✕ on the edit page):
+           flush with the top-right corner, sharing the card's radius and border
+           so it reads as part of the card. 18px tall so it stays inside the
+           card's 20px padding and never touches the metric cards below. */
+        .manual-icon-btn { position: absolute; top: 0; right: 0; width: 38px; height: 18px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(124, 58, 237, 0.1); border: none; border-left: 1px solid rgba(148, 163, 184, 0.25); border-bottom: 1px solid rgba(148, 163, 184, 0.25); border-radius: 0 15px 0 10px; cursor: pointer; transition: background 0.2s ease; z-index: 10; }
+        .manual-icon-btn:hover { background: rgba(124, 58, 237, 0.22); }
+        .manual-icon-btn:focus-visible { outline: 2px solid #8b5cf6; outline-offset: -2px; }
+        .manual-icon-btn svg { width: 12px; height: 12px; stroke: #8b5cf6; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
     `;
     document.head.appendChild(style);
 

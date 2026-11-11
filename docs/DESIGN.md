@@ -33,8 +33,15 @@ Used when biometric logs are missing/wrong. Stored as in/out **pairs** (`manualE
 
 Other manual-mode notes:
 - An **open** ("still working") entry counts live to `now`; it ticks via a dedicated `manualTickInterval` (the normal `renderInterval` isn't created on empty days, which is exactly when manual mode is used).
-- Rows render the same work/break capsule as the main page; break on a row = the gap before that pair.
+- The edit page reuses the results page's visual language: the same `metric-card` gradient cards and colour roles (purple = Total Duration, pink = Break, blue = Completion, which also hosts the break planner), the `manual-icon-btn` corner tab (✕ to leave, where the results page has the pen; styled once in the global stylesheet, flush with the card's top-right corner and 18px tall so it stays inside the card's 20px padding), and the gradient primary button.
+- Punches render as one row per pair: `IN ──[work]── OUT  [☕ break]`. The purple work pill sits on the connector between the two times (dashed after the pill while the pair is still open); the blue pill on the right is the break *before* that pair, so the first row's slot is empty. Same colours as the work/break capsule on Keka's log rows. Rows share one grid (`.me-list` columns + `subgrid` rows) so the work pills line up across rows without fixed widths.
+- Budget for ~290px: that's the panel's inner width inside Keka's regularization modal, far narrower than a standalone preview. Times drop the leading zero and the per-punch × floats on the time (shown on row hover) instead of taking inline space. Check layout changes inside the real modal, not just a wide preview.
+- A single input adds punches: one time inserts one punch, a range (`9:30 AM - 1:00 PM`, `–` or `to`) inserts both ends. Both go through `insertPunch` then re-pair.
+- The ✕ button exits immediately (no confirm), dropping the edited punches and falling back to the page's logs.
 - No overlap validation: the punch/shift model sorts + re-pairs, and corrective inserts may intentionally interleave.
 
 ## Layout
 The results page and the manual page are both framed as a single card on `.total-duration-display`. The manual page's inner `.manual-entry-container` is a flush wrapper only (no box), so the two pages look identical and there's no box-in-a-box.
+
+## Rendering the results card
+`updateUI` runs every second while a punch is open, but the results card is only rebuilt when its layout changes. The layout key is: completed, wrap-up banner and its minute label, 4h/8h target, and debug mode. The rebuild is the full `innerHTML` write, the clone-swap that drops old listeners, and the listener re-bind. On every other tick only the five `[data-k]` value nodes are patched, and only when their HTML differs. That keeps animations (the footer heart), hover state and listeners intact. The copy handlers read the module-level `homeCopy`, refreshed each tick, not the locals of the render that bound them, so copied values stay live. Any new per-tick value on the card needs a `data-k` entry in `valuesHTML`. Anything that changes the card's structure must go into `layoutKey`.
